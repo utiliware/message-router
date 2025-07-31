@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM app - SNS -> Lambda -> DynamoDB
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.12
+
+Resources:
+
+  # --- DynamoDB Table ---
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MessagesTable
+      AttributeDefinitions:
+        - AttributeName: MessageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: MessageId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # --- SNS Topic ---
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: MyTargetTopic
+
+  # --- Lambda que inserta en DynamoDB ---
+  DynamoLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda_dynamo/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MessagesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+
+  # --- Permisos para que SNS invoque al Lambda ---
+  PermissionForSNSInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynamoLambda
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref MySNSTopic
+
+  # --- Suscripción SNS a Lambda ---
+  DynamoLambdaSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: PermissionForSNSInvokeLambda
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt DynamoLambda.Arn
+      TopicArn: !Ref MySNSTopic
+
+Outputs:
+  SNSTopicArn:
+    Description: "ARN del tópico SNS"
+    Value: !Ref MySNSTopic
+  DynamoDBTableName:
+    Description: "SnsMessage"
+    Value: !Ref MessagesTable
