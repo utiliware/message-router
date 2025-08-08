@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM app with API Gateway -> Lambda -> SQS -> Lambda -> EventBridge -> SNS
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.13
+
+Resources:
+
+  # --- Cola SQS ---
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: MyMessageQueue
+
+  # --- API Lambda que envía a SQS ---
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello_world/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref MessageQueue
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+      Events:
+        ApiPost:
+          Type: Api
+          Properties:
+            Path: /send
+            Method: post
+
+  # --- Lambda que consume SQS y publica en EventBridge ---
+  QueueProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: queue_processor/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: MyCustomBus
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource: "*"
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MessageQueue.Arn
+            BatchSize: 10
+
+  # --- EventBridge Bus ---
+  MyEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: MyCustomBus
+
+  # --- Regla de EventBridge (ejemplo hacia Lambda) ---
+  EventRuleSample:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: SampleRule
+      EventBusName: MyCustomBus
+      EventPattern:
+        source:
+          - "my.sqs.processor"
+        detail-type:
+          - "SQSMessage"
+      Targets:
+        - Arn: !GetAtt QueueProcessorFunction.Arn
+          Id: "JustForDemo"
+
+  # Permiso para que EventBridge invoque Lambda (regla 1)
+  PermissionForEventBridge:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref QueueProcessorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventRuleSample.Arn
+
+  # --- SNS Topic ---
+  MySnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: MySnsTopic
+
+  # --- Regla EventBridge hacia SNS ---
+  EventRuleToSNS:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ForwardToSNSRule
+      EventBusName: MyCustomBus
+      EventPattern:
+        source:
+          - "my.sqs.processor"
+        detail-type:
+          - "SQSMessage"
+      Targets:
+        - Arn: !Ref MySnsTopic
+          Id: "SendToSNS"
+
+  # --- Permiso para que EventBridge publique en SNS Topic ---
+  PermissionForEventBridgeToSNS:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref MySnsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeToPublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: "sns:Publish"
+            Resource: !Ref MySnsTopic
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/send"
+
