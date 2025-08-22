@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  ddb-to-s3: DynamoDB → Lambda → S3
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+
+Resources:
+
+  MyDdbTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-Table'
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  TargetBucket:
+    Type: AWS::S3::Bucket
+
+  DdbToS3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-Handler'
+      Handler: app.lambda_handler
+      CodeUri: src/
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref TargetBucket
+      Events:
+        DdbStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt MyDdbTable.StreamArn
+            BatchSize: 1
+            StartingPosition: LATEST
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MyDdbTable
+        - S3WritePolicy:
+            BucketName: !Ref TargetBucket
+
+Outputs:
+  TableName:
+    Description: "DynamoDB table name"
+    Value: !Ref MyDdbTable
+
+  BucketName:
+    Description: "Name of the S3 bucket"
+    Value: !Ref TargetBucket
+
+  LambdaFunction:
+    Description: "Lambda ARN that transfers logs to S3"
+    Value: !GetAtt DdbToS3Function.Arn
