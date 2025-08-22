@@ -24,7 +24,7 @@ def lambda_handler(event, context):
 
         # Crear el evento para EventBridge
         entries.append({
-            'Source': 'my.custom.source',            # Debe coincidir exactamente con EventPattern
+            'Source': 'my.custom.source',            # Debe coincidir exactamente con EventPatterng
             'DetailType': 'MessageFromSQS',          # Puedes cambiar el tipo si quieres
             'Detail': json.dumps(body),              # El contenido del evento
             'EventBusName': 'default'                # Bus default
