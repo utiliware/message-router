@@ -3,7 +3,7 @@
 version = 0.1
 
 [default.global.parameters]
-stack_name = "ddb-to-s3"
+stack_name = "sns-ddb"
 
 [default.build.parameters]
 cached = true
