@@ -14,7 +14,7 @@ def lambda_handler(event, context):
         sns_message = record['Sns']['Message']
         try:
             data = json.loads(sns_message)
-            message = data.get("message", "Mensaje sin contenido") 
+            message = data.get("detail", {}).get("message", "Mensaje sin contenido")
         except Exception as e:
             print("Error al procesar mensaje SNS:", str(e))
             message = sns_message

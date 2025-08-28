@@ -115,7 +115,11 @@ Resources:
       Description: "Regla de EventBridge que publica en SNS"
       EventPattern:
         source:
-          - "default"
+          - "MyApp"
+          - "my.custom.source"
+        detail-type:
+          - "PlainText"
+          - "MyEvent"
       Targets:
         - Arn: !Ref MySNSTopic
           Id: "SnsTarget"
