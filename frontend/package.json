@@ -1,0 +1,26 @@
+{
+  "name": "message-router",
+  "version": "1.0.0",
+  "description": "e=${1:-sandbox}",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "npx @tailwindcss/cli -i ./src/input.css -o ./src/output.css --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/utiliware/message-router.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/utiliware/message-router/issues"
+  },
+  "homepage": "https://github.com/utiliware/message-router#readme",
+  "dependencies": {
+    "@tailwindcss/cli": "^4.1.12",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tailwindcss": "^4.1.12"
+  }
+}
