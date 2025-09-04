@@ -1,6 +1,8 @@
 import json
 import boto3
 import os
+from aws_xray_sdk.core import patch_all, xray_recorder
+patch_all()
 
 sqs = boto3.client('sqs')
 QUEUE_URL = os.environ.get('QUEUE_URL')

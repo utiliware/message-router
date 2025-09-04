@@ -1,16 +1,29 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: "SAM App: SNS \u2192 Lambda \u2192 DynamoDB \u2192 Lambda \u2192 S3\n"
+Description: 'SAM App: SNS -> Lambda -> DynamoDB -> Lambda -> S3
+
+  '
 Globals:
   Function:
     Timeout: 10
     Runtime: python3.12
+    Layers:
+    - Ref: CommonDependenciesLayer
+  Api:
+    TracingEnabled: true
 Resources:
+  CommonDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: ..\..\dependencies
+      CompatibleRuntimes:
+      - python3.12
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ApiFunction
       Handler: app.lambda_handler
+      Tracing: Active
       Environment:
         Variables:
           QUEUE_URL:
@@ -21,6 +34,7 @@ Resources:
             Fn::GetAtt:
             - MessageQueue
             - QueueName
+      - AWSXRayDaemonWriteAccess
       Events:
         ApiPost:
           Type: Api
@@ -38,6 +52,7 @@ Resources:
     Properties:
       CodeUri: LambdaDispatcher
       Handler: app.lambda_handler
+      Tracing: Active
       Runtime: python3.12
       Policies:
       - SQSPollerPolicy:
@@ -50,6 +65,7 @@ Resources:
           Action:
           - events:PutEvents
           Resource: '*'
+      - AWSXRayDaemonWriteAccess
       Events:
         SQSTrigger:
           Type: SQS
@@ -121,6 +137,7 @@ Resources:
     Properties:
       CodeUri: DynamoLambda
       Handler: app.lambda_handler
+      Tracing: Active
       Runtime: python3.12
       Environment:
         Variables:
@@ -130,6 +147,7 @@ Resources:
       - DynamoDBCrudPolicy:
           TableName:
             Ref: MessagesTable
+      - AWSXRayDaemonWriteAccess
     Metadata:
       SamResourceId: DynamoLambda
   MessagesTable:
@@ -151,6 +169,7 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-DdbToS3Handler
       Handler: app.lambda_handler
+      Tracing: Active
       CodeUri: DdbToS3Function
       Timeout: 30
       Environment:
@@ -174,6 +193,7 @@ Resources:
       - S3WritePolicy:
           BucketName:
             Ref: TargetBucket
+      - AWSXRayDaemonWriteAccess
     Metadata:
       SamResourceId: DdbToS3Function
   TargetBucket:

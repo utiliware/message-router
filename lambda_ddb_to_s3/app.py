@@ -6,6 +6,8 @@ from datetime import datetime
 from uuid import uuid4
 from decimal import Decimal
 from boto3.dynamodb.types import TypeDeserializer
+from aws_xray_sdk.core import patch_all, xray_recorder
+patch_all()
 
 LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)

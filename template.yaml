@@ -7,21 +7,37 @@ Globals:
   Function:
     Timeout: 10
     Runtime: python3.12
+    Layers: 
+     - !Ref CommonDependenciesLayer
+  Api:
+    TracingEnabled: true   #  ACTIVAR X-RAY EN API GATEWAY
 
 Resources:
+  CommonDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: dependencies/
+      CompatibleRuntimes:
+        - python3.12
+
 
   # --- [Lambda] Message router queue: API Gateway -> SQS ---
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: message_router_queue/
       Handler: app.lambda_handler
+      Tracing: Active
+
       Environment:
         Variables:
           QUEUE_URL: !Ref MessageQueue
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt MessageQueue.QueueName
+        - AWSXRayDaemonWriteAccess
+
       Events:
         ApiPost:
           Type: Api
@@ -41,6 +57,7 @@ Resources:
     Properties:
       CodeUri: lambda_dispatcher/
       Handler: app.lambda_handler
+      Tracing: Active
       Runtime: python3.12
       Policies:
         - SQSPollerPolicy:
@@ -50,6 +67,7 @@ Resources:
             Action:
               - events:PutEvents
             Resource: "*"
+        - AWSXRayDaemonWriteAccess   #  Permiso X-Ray
       Events:
         SQSTrigger:
           Type: SQS
@@ -120,6 +138,7 @@ Resources:
     Properties:
       CodeUri: lambda_dynamo/
       Handler: app.lambda_handler
+      Tracing: Active
       Runtime: python3.12
       Environment:
         Variables:
@@ -127,6 +146,7 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
+        - AWSXRayDaemonWriteAccess   #  Permiso X-Ray
 
   # --- DynamoDB ---
   MessagesTable:
@@ -149,6 +169,7 @@ Resources:
     Properties:
       FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
       Handler: app.lambda_handler
+      Tracing: Active
       CodeUri: lambda_ddb_to_s3/   
       Timeout: 30      
       Environment:
@@ -166,10 +187,12 @@ Resources:
             TableName: !Ref MessagesTable
         - S3WritePolicy:
             BucketName: !Ref TargetBucket
+        - AWSXRayDaemonWriteAccess   #  Permiso X-Ray
 
   # --- S3 Bucket ---
   TargetBucket:
     Type: AWS::S3::Bucket
+
 
 
 Outputs:
@@ -185,3 +208,7 @@ Outputs:
   BucketName:
     Description: "Name of the S3 bucket"
     Value: !Ref TargetBucket
+
+
+
+

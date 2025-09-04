@@ -2,6 +2,8 @@ import json
 import os
 import uuid
 import boto3
+from aws_xray_sdk.core import patch_all, xray_recorder
+patch_all()
 
 dynamodb = boto3.resource('dynamodb')
 table_name = os.environ['TABLE_NAME']  
