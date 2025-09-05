@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM App: API -> SQS -> Lambda -> EventBridge (Rule1->Rule2) -> SNS -> Lambda -> DynamoDB -> Lambda(Stream) -> S3
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.13
+
+Resources:
+
+  # --- API -> SQS -------------------------------------------------------------
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: message_router_queue/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref MessageQueue
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+      Events:
+        ApiPost:
+          Type: Api
+          Properties:
+            Path: /send
+            Method: post
+
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: MyMessageQueue
+
+  # --- SQS -> EventBridge (bus-rule-1) ---------------------------------------
+  LambdaDispatcher:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda_dispatcher/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: !Ref EventBusRule1   # publica en bus 1
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action: events:PutEvents
+            Resource: !GetAtt EventBusRule1.Arn
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MessageQueue.Arn
+            BatchSize: 1
+
+  # --- EventBridge Buses ------------------------------------------------------
+  EventBusRule1:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: bus-rule-1
+
+  EventBusRule2:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: bus-rule-2
+
+  # Role para que Rule1 pueda publicar en bus-rule-2
+  Rule1ToBus2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: allow-put-to-bus2
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !GetAtt EventBusRule2.Arn
+
+  # Rule 1 (en bus 1) -> Target = EventBus (bus 2)
+  Rule1ForwardToBus2:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: rule1-forward-to-bus2
+      Description: "Regla 1 reenvía el evento al bus-rule-2"
+      EventBusName: !Ref EventBusRule1
+      EventPattern:
+        source:
+          - "MyApp"
+        detail-type:
+          - "PlainText"
+          - "MyEvent"
+      Targets:
+        - Id: send-to-bus2
+          Arn: !GetAtt EventBusRule2.Arn
+          RoleArn: !GetAtt Rule1ToBus2Role.Arn
+
+  # Rule 2 (en bus 2) -> SNS
+  Rule2ToSNS:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: rule2-to-sns
+      Description: "Regla 2 envía el evento a SNS"
+      EventBusName: !Ref EventBusRule2
+      EventPattern:
+        source:
+          - "MyApp"
+        detail-type:
+          - "PlainText"
+          - "MyEvent"
+      Targets:
+        - Arn: !Ref MySNSTopic
+          Id: "SnsTarget"
+
+  # --- SNS Topic + permisos para EventBridge y para invocar Lambda ------------
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: MyTargetTopic
+
+  EventBridgeToSNSPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref MySNSTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeToPublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref MySNSTopic
+
+  PermissionForSNSInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynamoLambda
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref MySNSTopic
+
+  DynamoLambdaSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: PermissionForSNSInvokeLambda
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt DynamoLambda.Arn
+      TopicArn: !Ref MySNSTopic
+
+  # --- SNS -> Lambda -> DynamoDB ---------------------------------------------
+  DynamoLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda_dynamo/
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MessagesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MessagesTable
+      AttributeDefinitions:
+        - AttributeName: MessageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: MessageId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # --- DynamoDB Stream -> Lambda -> S3 ---------------------------------------
+  DdbToS3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
+      Handler: app.lambda_handler
+      CodeUri: lambda_ddb_to_s3/
+      Timeout: 30
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref TargetBucket
+      Events:
+        DdbStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt MessagesTable.StreamArn
+            BatchSize: 1
+            StartingPosition: LATEST
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MessagesTable
+        - S3WritePolicy:
+            BucketName: !Ref TargetBucket
+
+  TargetBucket:
+    Type: AWS::S3::Bucket
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/send"
+  SNSTopicArn:
+    Description: "SNS Topic ARN"
+    Value: !Ref MySNSTopic
+  DynamoDBTableName:
+    Description: "DynamoDB Table Name"
+    Value: !Ref MessagesTable
+  BucketName:
+    Description: "Name of the S3 bucket"
+    Value: !Ref TargetBucket
+  Bus1Name:
+    Description: "EventBridge Bus 1"
+    Value: !Ref EventBusRule1
+  Bus2Name:
+    Description: "EventBridge Bus 2"
+    Value: !Ref EventBusRule2
