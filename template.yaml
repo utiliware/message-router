@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM App: SNS -> Lambda -> DynamoDB -> Lambda -> S3
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.12
+
+Resources:
+
+  # --- API Gateway con CORS ---
+  MessageApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'OPTIONS,POST'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"   # Para pruebas locales, puedes restringir luego a tu dominio
+
+  # --- Lambda que expone API Gateway ---
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/message_router_queue/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref MessageQueue
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+      Events:
+        ApiPost:
+          Type: Api
+          Properties:
+            Path: /send
+            Method: post
+            RestApiId: !Ref MessageApi   # <-- Asociamos Lambda a API con CORS
+
+  # --- SQS Queue ---
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: MyMessageQueue
+
+  # --- Lambda Dispatcher: SQS -> EventBridge ---
+  LambdaDispatcher:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_dispatcher/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt MessageQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource: "*"
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MessageQueue.Arn
+            BatchSize: 1
+
+  # --- EventBridge Rule 1 -> SNS ---
+  EventRuleToSNS:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: SendToSNSRule
+      Description: "Regla de EventBridge que publica en SNS"
+      EventPattern:
+        source:
+          - "MyApp"
+          - "my.custom.source"
+        detail-type:
+          - "PlainText"
+          - "MyEvent"
+      Targets:
+        - Arn: !Ref MySNSTopic
+          Id: "SnsTarget"
+
+  # Policy that allows EventBridge to publish in SNS
+  EventBridgeToSNSPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref MySNSTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeToPublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref MySNSTopic
+
+  # --- SNS Topic ---
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: MyTargetTopic
+
+  # Permissions for SNS to invoke Lambda
+  PermissionForSNSInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynamoLambda
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref MySNSTopic
+
+  # SNS subscription to Lambda
+  DynamoLambdaSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: PermissionForSNSInvokeLambda
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt DynamoLambda.Arn
+      TopicArn: !Ref MySNSTopic
+
+  # --- Lambda Dynamo: SNS -> DynamoDB ---
+  DynamoLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_dynamo/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MessagesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+
+  # --- DynamoDB ---
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MessagesTable
+      AttributeDefinitions:
+        - AttributeName: MessageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: MessageId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # --- Lambda DDB to S3: DynamoDB -> S3 ---
+  DdbToS3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
+      Handler: app.lambda_handler
+      CodeUri: backend/src/handlers/lambda_ddb_to_s3/   
+      Timeout: 30      
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref TargetBucket
+      Events:
+        DdbStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt MessagesTable.StreamArn
+            BatchSize: 1
+            StartingPosition: LATEST 
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MessagesTable
+        - S3WritePolicy:
+            BucketName: !Ref TargetBucket
+
+  # --- S3 Bucket ---
+  TargetBucket:
+    Type: AWS::S3::Bucket
+
+
+  # --- API Gateway para métricas --- NEW
+  MetricsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: MetricsStage
+      Cors:
+        AllowMethods: "'OPTIONS,GET'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+  # --- Lambda que expone métricas ---
+  MetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_metrics
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Policies:
+        - CloudWatchReadOnlyAccess   # para leer métricas de CloudWatch
+      Events:
+        MetricsApiGet:
+          Type: Api
+          Properties:
+            Path: /metrics
+            Method: get
+            RestApiId: !Ref MetricsApi   # Asociamos al API Gateway con CORS
+
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint"
+    Value: !Sub "https://${MessageApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/send"
+  SNSTopicArn:
+    Description: "SNS Topic ARN"
+    Value: !Ref MySNSTopic
+  DynamoDBTableName:
+    Description: "DynamoDB Table Name"
+    Value: !Ref MessagesTable
+  BucketName:
+    Description: "Name of the S3 bucket"
+    Value: !Ref TargetBucket
+  MetricsApiUrl: # --- NEW ---
+    Description: "API Gateway endpoint para métricas"
+    Value: !Sub "https://${MetricsApi}.execute-api.${AWS::Region}.amazonaws.com/MetricsStage/metrics" # MODIFY
