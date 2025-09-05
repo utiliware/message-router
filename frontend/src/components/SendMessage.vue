@@ -1,30 +1,20 @@
 <template>
-  <div class="d-flex flex-column align-items-center justify-content-center min-vh-100 bg-light">
-    <div class="w-100" style="max-width: 28rem;">
-      <div class="card shadow-lg rounded-4 p-4">
-        <h2 class="h4 fw-bold mb-4 text-center text-primary">Message Router</h2>
-        
-        <input
-          v-model="message"
-          type="text"
-          placeholder="Write your message..."
-          class="form-control mb-3"
-        />
+  <main class="container flow">
+    <form class="card contrast" @submit.prevent="sendMessage">
+      <h2>One Message</h2>
 
-        <button
-          @click="sendMessage"
-          class="btn btn-primary w-100"
-        >
-          Send
-        </button>
+      <label>
+        Message
+        <input v-model="message" type="text" placeholder="Write your message..." required />
+      </label>
 
-        <p v-if="response" class="mt-3 text-success fw-semibold">{{ response }}</p>
-        <p v-if="error" class="mt-3 text-danger fw-semibold">{{ error }}</p>
-      </div>
-    </div>
-  </div>
+      <button type="submit">Send</button>
+
+      <p v-if="response" class="success">{{ response }}</p>
+      <p v-if="error" class="error">{{ error }}</p>
+    </form>
+  </main>
 </template>
-
 
 <script>
 import axios from "axios";
@@ -43,9 +33,9 @@ export default {
       this.response = null;
       this.error = null;
       try {
-        const mensaje = this.message; // guardar antes de limpiar
+        const mensaje = this.message;
         const res = await axios.post(
-          process.env.VUE_APP_API_URL,
+          import.meta.env.VITE_API_URL,
           { message: this.message }
         );
         this.response = `Message: "${mensaje}" - State: ${res.data.status}`;
@@ -58,3 +48,26 @@ export default {
   },
 };
 </script>
+
+<style>
+
+.card.contrast {
+  max-width: 28rem;
+  padding: 2rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.1);
+}
+
+.success {
+  color: green;
+  font-weight: 600;
+}
+
+.error {
+  color: red;
+  font-weight: 600;
+}
+</style>
+
+
+

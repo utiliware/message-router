@@ -1,6 +1,6 @@
 <template>
   <div class="container mx-auto p-6 max-w-3xl bg-white shadow-md rounded-lg">
-    <h2 class="text-2xl font-bold mb-4 text-center">Concurrencia Lambda</h2>
+    <h2 class="text-2xl font-bold mb-4 text-center">Graficas Lambda</h2>
     <canvas ref="chart"></canvas>
   </div>
 </template>
