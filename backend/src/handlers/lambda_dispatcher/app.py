@@ -2,6 +2,9 @@ import os
 import json
 import boto3
 
+from aws_xray_sdk.core import xray_recorder, patch_all
+patch_all() 
+
 # Cliente de EventBridge
 eventbridge = boto3.client('events')
 

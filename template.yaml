@@ -7,18 +7,31 @@ Globals:
   Function:
     Timeout: 10
     Runtime: python3.12
+    Layers:
+      - !Ref CommonDependenciesLayer   # aws-xray-sdk layer
+  Api:
+    TracingEnabled: true   
 
 Resources:
+
+  # Layer con dependencias (incluye aws-xray-sdk en dependencies/requirements.txt)
+  CommonDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: dependencies/
+      CompatibleRuntimes:
+        - python3.12
 
   # --- API Gateway con CORS ---
   MessageApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: Prod
+      TracingEnabled: true
       Cors:
         AllowMethods: "'OPTIONS,POST'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"   # Para pruebas locales, puedes restringir luego a tu dominio
+        AllowOrigin: "'*'"   # Para pruebas locales
 
   # --- Lambda que expone API Gateway ---
   ApiFunction:
@@ -26,19 +39,21 @@ Resources:
     Properties:
       CodeUri: backend/src/handlers/message_router_queue/
       Handler: app.lambda_handler
+      Tracing: Active
       Environment:
         Variables:
           QUEUE_URL: !Ref MessageQueue
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt MessageQueue.QueueName
+        - AWSXRayDaemonWriteAccess
       Events:
         ApiPost:
           Type: Api
           Properties:
             Path: /send
             Method: post
-            RestApiId: !Ref MessageApi   # <-- Asociamos Lambda a API con CORS
+            RestApiId: !Ref MessageApi
 
   # --- SQS Queue ---
   MessageQueue:
@@ -53,6 +68,7 @@ Resources:
       CodeUri: backend/src/handlers/lambda_dispatcher/
       Handler: app.lambda_handler
       Runtime: python3.12
+      Tracing: Active
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt MessageQueue.QueueName
@@ -61,6 +77,7 @@ Resources:
             Action:
               - events:PutEvents
             Resource: "*"
+        - AWSXRayDaemonWriteAccess
       Events:
         SQSTrigger:
           Type: SQS
@@ -106,6 +123,34 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: MyTargetTopic
+      TracingConfig: 'Active'   # <-- habilita X-Ray para SNS
+
+  # X-Ray resource policy para SNS
+  XRayResourcePolicyForSNS:
+    Type: AWS::XRay::ResourcePolicy
+    Properties:
+      PolicyName: AllowSNSXRayPutTraceSegments
+      PolicyDocument: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "SNSAccess",
+              "Effect": "Allow",
+              "Principal": { "Service": "sns.amazonaws.com" },
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": { "aws:SourceAccount": "${AWS::AccountId}" },
+                "StringLike": { "aws:SourceArn": "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:*" }
+              }
+            }
+          ]
+        }
 
   # Permissions for SNS to invoke Lambda
   PermissionForSNSInvokeLambda:
@@ -132,12 +177,14 @@ Resources:
       CodeUri: backend/src/handlers/lambda_dynamo/
       Handler: app.lambda_handler
       Runtime: python3.12
+      Tracing: Active
       Environment:
         Variables:
           TABLE_NAME: !Ref MessagesTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
+        - AWSXRayDaemonWriteAccess
 
   # --- DynamoDB ---
   MessagesTable:
@@ -160,6 +207,7 @@ Resources:
     Properties:
       FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
       Handler: app.lambda_handler
+      Tracing: Active
       CodeUri: backend/src/handlers/lambda_ddb_to_s3/   
       Timeout: 30      
       Environment:
@@ -177,17 +225,18 @@ Resources:
             TableName: !Ref MessagesTable
         - S3WritePolicy:
             BucketName: !Ref TargetBucket
+        - AWSXRayDaemonWriteAccess
 
   # --- S3 Bucket ---
   TargetBucket:
     Type: AWS::S3::Bucket
 
-
-  # --- API Gateway para métricas --- NEW
+  # --- API Gateway para métricas ---
   MetricsApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: MetricsStage
+      TracingEnabled: true
       Cors:
         AllowMethods: "'OPTIONS,GET'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
@@ -200,16 +249,210 @@ Resources:
       CodeUri: backend/src/handlers/lambda_metrics
       Handler: app.lambda_handler
       Runtime: python3.12
+      Tracing: Active
       Policies:
-        - CloudWatchReadOnlyAccess   # para leer métricas de CloudWatch
+        - CloudWatchReadOnlyAccess
+        - AWSXRayDaemonWriteAccess
       Events:
         MetricsApiGet:
           Type: Api
           Properties:
             Path: /metrics
             Method: get
-            RestApiId: !Ref MetricsApi   # Asociamos al API Gateway con CORS
+            RestApiId: !Ref MetricsApi
 
+  # --- Dashboard ---
+  CloudWatchDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-ServiceOverview"
+      DashboardBody:
+        !Sub
+          - |
+            {
+              "widgets": [
+                {
+                  "type": "text",
+                  "x": 0,
+                  "y": 0,
+                  "width": 24,
+                  "height": 1,
+                  "properties": {
+                    "markdown": "# Service overview dashboard for ${StackName}\nAPI Gateway, Lambda, SQS, DynamoDB, SNS and S3 key metrics."
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 0,
+                  "y": 8,
+                  "width": 6,
+                  "height": 6,
+                  "properties": {
+                    "title": "SQS Visible Messages",
+                    "view": "gauge",
+                    "region": "${Region}",
+                    "period": 60,
+                    "metrics": [
+                      ["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${MessageQueue}",{"stat":"Average"}]
+                    ],
+                    "yAxis": { "left": { "min": 0, "max": 100 } }
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 6,
+                  "y": 8,
+                  "width": 6,
+                  "height": 6,
+                  "properties": {
+                    "title": "DynamoDB ThrottledRequests (MessagesTable)",
+                    "view": "gauge",
+                    "region": "${Region}",
+                    "period": 60,
+                    "metrics": [
+                      ["AWS/DynamoDB","ThrottledRequests","TableName","${MessagesTable}",{"stat":"Sum"}]
+                    ],
+                    "yAxis": { "left": { "min": 0, "max": 50 } }
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 12,
+                  "y": 8,
+                  "width": 6,
+                  "height": 6,
+                  "properties": {
+                    "title": "SNS Messages Published (recent)",
+                    "view": "gauge",
+                    "region": "${Region}",
+                    "period": 300,
+                    "metrics": [
+                      ["AWS/SNS","NumberOfMessagesPublished","TopicName","${MySNSTopicName}",{"stat":"Sum"}]
+                    ],
+                    "yAxis": { "left": { "min": 0, "max": 1000 } }
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 18,
+                  "y": 8,
+                  "width": 6,
+                  "height": 6,
+                  "properties": {
+                    "title": "S3 NumberOfObjects (TargetBucket)",
+                    "view": "gauge",
+                    "region": "${Region}",
+                    "period": 86400,
+                    "metrics": [
+                      ["AWS/S3","NumberOfObjects","BucketName","${TargetBucket}","StorageType","AllStorageTypes",{"stat":"Average"}]
+                    ],
+                    "yAxis": { "left": { "min": 0, "max": 1000000 } }
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 0,
+                  "y": 15,
+                  "width": 12,
+                  "height": 6,
+                  "properties": {
+                    "title": "SQS Queue: visible / in-flight / sent",
+                    "view": "timeSeries",
+                    "region": "${Region}",
+                    "period": 60,
+                    "metrics": [
+                      ["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${MessageQueue}",{"stat":"Average"}],
+                      ["AWS/SQS","ApproximateNumberOfMessagesNotVisible","QueueName","${MessageQueue}",{"stat":"Average"}],
+                      ["AWS/SQS","NumberOfMessagesSent","QueueName","${MessageQueue}",{"stat":"Sum"}],
+                      ["AWS/SQS","NumberOfMessagesReceived","QueueName","${MessageQueue}",{"stat":"Sum"}]
+                    ]
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 12,
+                  "y": 15,
+                  "width": 12,
+                  "height": 6,
+                  "properties": {
+                    "title": "DynamoDB (MessagesTable): Consumed R/W & Throttles",
+                    "view": "timeSeries",
+                    "region": "${Region}",
+                    "period": 60,
+                    "metrics": [
+                      ["AWS/DynamoDB","ConsumedReadCapacityUnits","TableName","${MessagesTable}",{"stat":"Sum"}],
+                      ["AWS/DynamoDB","ConsumedWriteCapacityUnits","TableName","${MessagesTable}",{"stat":"Sum"}],
+                      ["AWS/DynamoDB","ThrottledRequests","TableName","${MessagesTable}",{"stat":"Sum"}]
+                    ]
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 0,
+                  "y": 22,
+                  "width": 12,
+                  "height": 6,
+                  "properties": {
+                    "title": "SNS: NumberOfMessagesPublished",
+                    "view": "timeSeries",
+                    "region": "${Region}",
+                    "period": 300,
+                    "metrics": [
+                      ["AWS/SNS","NumberOfMessagesPublished","TopicName","${MySNSTopicName}",{"stat":"Sum"}]
+                    ]
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 12,
+                  "y": 22,
+                  "width": 12,
+                  "height": 6,
+                  "properties": {
+                    "title": "S3: Bucket size & object count (TargetBucket)",
+                    "view": "timeSeries",
+                    "region": "${Region}",
+                    "period": 86400,
+                    "metrics": [
+                      ["AWS/S3","BucketSizeBytes","BucketName","${TargetBucket}","StorageType","StandardStorage",{"stat":"Average"}],
+                      ["AWS/S3","NumberOfObjects","BucketName","${TargetBucket}","StorageType","AllStorageTypes",{"stat":"Average"}]
+                    ]
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 0,
+                  "y": 29,
+                  "width": 24,
+                  "height": 6,
+                  "properties": {
+                    "title": "Lambda Invocations (last 1h)",
+                    "view": "timeSeries",
+                    "region": "${Region}",
+                    "period": 60,
+                    "metrics": [
+                      ["AWS/Lambda","Invocations","FunctionName","${ApiFunction}",{"stat":"Sum"}],
+                      ["AWS/Lambda","Invocations","FunctionName","${LambdaDispatcher}",{"stat":"Sum"}],
+                      ["AWS/Lambda","Invocations","FunctionName","${DynamoLambda}",{"stat":"Sum"}],
+                      ["AWS/Lambda","Invocations","FunctionName","${DdbToS3Function}",{"stat":"Sum"}]
+                    ]
+                  }
+                }
+              ]
+            }
+          - {
+              StackName: !Ref "AWS::StackName",
+              Region: !Ref "AWS::Region",
+              MessageApi: !Ref MessageApi,
+              ApiFunction: !Ref ApiFunction,
+              LambdaDispatcher: !Ref LambdaDispatcher,
+              DynamoLambda: !Ref DynamoLambda,
+              DdbToS3Function: !Ref DdbToS3Function,
+              MessageQueue: !GetAtt MessageQueue.QueueName,
+              MessagesTable: !Ref MessagesTable,
+              MySNSTopicName: !Select [5, !Split [":", !Ref MySNSTopic]],
+              TargetBucket: !Ref TargetBucket
+            }
 
 Outputs:
   ApiUrl:
@@ -224,6 +467,6 @@ Outputs:
   BucketName:
     Description: "Name of the S3 bucket"
     Value: !Ref TargetBucket
-  MetricsApiUrl: # --- NEW ---
+  MetricsApiUrl:
     Description: "API Gateway endpoint para métricas"
-    Value: !Sub "https://${MetricsApi}.execute-api.${AWS::Region}.amazonaws.com/MetricsStage/metrics" # MODIFY
+    Value: !Sub "https://${MetricsApi}.execute-api.${AWS::Region}.amazonaws.com/MetricsStage/metrics"

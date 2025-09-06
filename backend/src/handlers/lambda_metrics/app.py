@@ -2,6 +2,9 @@ import boto3
 import json
 from datetime import datetime, timedelta
 
+from aws_xray_sdk.core import xray_recorder, patch_all
+patch_all() 
+
 cloudwatch = boto3.client("cloudwatch")
 
 # Lista de lambdas que quieres monitorear

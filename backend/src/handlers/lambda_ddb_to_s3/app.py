@@ -7,6 +7,9 @@ from uuid import uuid4
 from decimal import Decimal
 from boto3.dynamodb.types import TypeDeserializer
 
+from aws_xray_sdk.core import xray_recorder, patch_all
+patch_all() 
+
 LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
 
