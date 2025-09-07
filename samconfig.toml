@@ -3,7 +3,7 @@
 version = 0.1
 
 [default.global.parameters]
-stack_name = "ReactApp"
+stack_name = "message-router"
 
 [default.build.parameters]
 cached = true

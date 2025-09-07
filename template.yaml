@@ -1,20 +1,19 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  SAM App: SNS -> Lambda -> DynamoDB -> Lambda -> S3
+Description: Messages betwen services using API Gateway, Lambda, SQS, EventBridge, SNS, DynamoDB and S3 with monitoring via CloudWatch and X-Ray
 
 Globals:
   Function:
     Timeout: 10
     Runtime: python3.12
     Layers:
-      - !Ref CommonDependenciesLayer   # aws-xray-sdk layer
+      - !Ref CommonDependenciesLayer
   Api:
     TracingEnabled: true   
 
 Resources:
 
-  # Layer con dependencias (incluye aws-xray-sdk en dependencies/requirements.txt)
+  # --- Layer with dependencies ---
   CommonDependenciesLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -22,7 +21,8 @@ Resources:
       CompatibleRuntimes:
         - python3.12
 
-  # --- API Gateway con CORS ---
+
+  # --- API Gateway with CORS ---
   MessageApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -31,9 +31,10 @@ Resources:
       Cors:
         AllowMethods: "'OPTIONS,POST'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"   # Para pruebas locales
+        AllowOrigin: "'*'"   # For local testing; in production, specify your domain
 
-  # --- Lambda que expone API Gateway ---
+
+  # --- Lambda messgae router queue: API -> SQS ---
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -55,11 +56,13 @@ Resources:
             Method: post
             RestApiId: !Ref MessageApi
 
+
   # --- SQS Queue ---
   MessageQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: MyMessageQueue
+
 
   # --- Lambda Dispatcher: SQS -> EventBridge ---
   LambdaDispatcher:
@@ -85,7 +88,8 @@ Resources:
             Queue: !GetAtt MessageQueue.Arn
             BatchSize: 1
 
-  # --- EventBridge Rule 1 -> SNS ---
+
+  # --- EventBridge: Rule 1 -> SNS ---
   EventRuleToSNS:
     Type: AWS::Events::Rule
     Properties:
@@ -118,12 +122,129 @@ Resources:
             Action: sns:Publish
             Resource: !Ref MySNSTopic
 
+
   # --- SNS Topic ---
   MySNSTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: MyTargetTopic
-      TracingConfig: 'Active'   # <-- habilita X-Ray para SNS
+      TracingConfig: 'Active'
+
+  # Permissions for SNS to invoke Lambda
+  PermissionForSNSInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynamoLambda
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref MySNSTopic
+
+  # SNS subscription to Lambda
+  DynamoLambdaSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: PermissionForSNSInvokeLambda
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt DynamoLambda.Arn
+      TopicArn: !Ref MySNSTopic
+
+
+  # --- Lambda Dynamo: SNS -> DynamoDB ---
+  DynamoLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_dynamo/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MessagesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - AWSXRayDaemonWriteAccess
+
+
+  # --- DynamoDB ---
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MessagesTable
+      AttributeDefinitions:
+        - AttributeName: MessageId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: MessageId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+
+  # --- Lambda DDB to S3: DynamoDB -> S3 ---
+  DdbToS3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
+      Handler: app.lambda_handler
+      Tracing: Active
+      CodeUri: backend/src/handlers/lambda_ddb_to_s3/   
+      Timeout: 30      
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref TargetBucket
+      Events:
+        DdbStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt MessagesTable.StreamArn
+            BatchSize: 1
+            StartingPosition: LATEST 
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MessagesTable
+        - S3WritePolicy:
+            BucketName: !Ref TargetBucket
+        - AWSXRayDaemonWriteAccess
+
+
+  # --- S3 Bucket ---
+  TargetBucket:
+    Type: AWS::S3::Bucket
+
+
+  # --- API Gateway para métricas ---
+  MetricsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: MetricsStage
+      TracingEnabled: true
+      Cors:
+        AllowMethods: "'OPTIONS,GET'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+
+  # --- Lambda que expone métricas ---
+  MetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_metrics
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Policies:
+        - CloudWatchReadOnlyAccess
+        - AWSXRayDaemonWriteAccess
+      Events:
+        MetricsApiGet:
+          Type: Api
+          Properties:
+            Path: /metrics
+            Method: get
+            RestApiId: !Ref MetricsApi
+
 
   # X-Ray resource policy para SNS
   XRayResourcePolicyForSNS:
@@ -152,114 +273,6 @@ Resources:
           ]
         }
 
-  # Permissions for SNS to invoke Lambda
-  PermissionForSNSInvokeLambda:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref DynamoLambda
-      Action: lambda:InvokeFunction
-      Principal: sns.amazonaws.com
-      SourceArn: !Ref MySNSTopic
-
-  # SNS subscription to Lambda
-  DynamoLambdaSubscription:
-    Type: AWS::SNS::Subscription
-    DependsOn: PermissionForSNSInvokeLambda
-    Properties:
-      Protocol: lambda
-      Endpoint: !GetAtt DynamoLambda.Arn
-      TopicArn: !Ref MySNSTopic
-
-  # --- Lambda Dynamo: SNS -> DynamoDB ---
-  DynamoLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/lambda_dynamo/
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Tracing: Active
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref MessagesTable
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref MessagesTable
-        - AWSXRayDaemonWriteAccess
-
-  # --- DynamoDB ---
-  MessagesTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: MessagesTable
-      AttributeDefinitions:
-        - AttributeName: MessageId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: MessageId
-          KeyType: HASH
-      BillingMode: PAY_PER_REQUEST
-      StreamSpecification:
-        StreamViewType: NEW_AND_OLD_IMAGES
-
-  # --- Lambda DDB to S3: DynamoDB -> S3 ---
-  DdbToS3Function:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
-      Handler: app.lambda_handler
-      Tracing: Active
-      CodeUri: backend/src/handlers/lambda_ddb_to_s3/   
-      Timeout: 30      
-      Environment:
-        Variables:
-          S3_BUCKET: !Ref TargetBucket
-      Events:
-        DdbStream:
-          Type: DynamoDB
-          Properties:
-            Stream: !GetAtt MessagesTable.StreamArn
-            BatchSize: 1
-            StartingPosition: LATEST 
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref MessagesTable
-        - S3WritePolicy:
-            BucketName: !Ref TargetBucket
-        - AWSXRayDaemonWriteAccess
-
-  # --- S3 Bucket ---
-  TargetBucket:
-    Type: AWS::S3::Bucket
-
-  # --- API Gateway para métricas ---
-  MetricsApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: MetricsStage
-      TracingEnabled: true
-      Cors:
-        AllowMethods: "'OPTIONS,GET'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"
-
-  # --- Lambda que expone métricas ---
-  MetricsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/lambda_metrics
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Tracing: Active
-      Policies:
-        - CloudWatchReadOnlyAccess
-        - AWSXRayDaemonWriteAccess
-      Events:
-        MetricsApiGet:
-          Type: Api
-          Properties:
-            Path: /metrics
-            Method: get
-            RestApiId: !Ref MetricsApi
 
   # --- Dashboard ---
   CloudWatchDashboard:
