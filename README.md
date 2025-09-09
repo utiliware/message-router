@@ -201,3 +201,4 @@ aws cloudformation deploy \
 	NotificationArn=$NotificationArn \
 	ClusterInstanceCount=$ClusterInstanceCount \
 	ClusterInstanceType=$ClusterInstanceType
+	
