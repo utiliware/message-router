@@ -1,0 +1,211 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Pipeline stack (CodePipeline + CodeBuild) for SAM app (message-router). Deploy separately from the application stack. Uses GitHub OAuth token stored in Secrets Manager."
+
+Parameters:
+  GitHubRepoOwner:
+    Type: String
+    Description: "GitHub owner (user or org) of the repo"
+  
+  GitHubRepoName:
+    Type: String
+    Default: message-router
+    Description: "Repository name (message-router)"
+  
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: "Branch the pipeline will watch"
+  
+  GitHubPATSecretName:
+    Type: String
+    Default: github/message-router/pat
+    Description: "Name of the secret in AWS Secrets Manager that contains the GitHub PAT (JSON with key 'token')"
+  
+  PipelineName:
+    Type: String
+    Default: message-router-pipeline
+  
+  DeployStackName:
+    Type: String
+    Default: message-router-prod
+
+Resources:
+  PipelineArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+    DeletionPolicy: Retain
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${PipelineName}-CodeBuildRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        # NOTE: AdministratorAccess is broad — tighten in production to minimum privileges required.
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  SAMBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${PipelineName}-Build"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:6.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Value: !Ref PipelineArtifactBucket
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref "AWS::Region"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+
+          phases:
+            install:
+              runtime-versions:
+                python: 3.11
+              commands:
+                - python -V
+                - pip install --upgrade pip
+                - pip install aws-sam-cli
+                - sam --version || true
+            build:
+              commands:
+                - echo "Running sam build..."
+                - sam build
+                - echo "Packaging into S3 bucket $ARTIFACT_BUCKET..."
+                - sam package --s3-bucket "$ARTIFACT_BUCKET" --output-template packaged-template.yaml
+          artifacts:
+            files:
+              - packaged-template.yaml
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${PipelineName}-Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: CodePipelineS3AndCodeBuildAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "${PipelineArtifactBucket.Arn}"
+                  - !Sub "${PipelineArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+        - PolicyName: CodePipelineSecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GitHubPATSecretName}*"
+
+  MyPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref PipelineName
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                Owner: !Ref GitHubRepoOwner
+                Repo: !Ref GitHubRepoName
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Sub '{{resolve:secretsmanager:${GitHubPATSecretName}:SecretString:token}}'
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: SAMBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              Configuration:
+                ProjectName: !Ref SAMBuildProject
+        - Name: Deploy
+          Actions:
+            - Name: CFN_Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: '1'
+              InputArtifacts:
+                - Name: BuildArtifact
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Ref DeployStackName
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM
+                TemplatePath: BuildArtifact::packaged-template.yaml
+
+Outputs:
+  PipelineName:
+    Description: "CodePipeline name"
+    Value: !Ref PipelineName
+  PipelineArtifactBucket:
+    Description: "S3 bucket for pipeline artifacts"
+    Value: !Ref PipelineArtifactBucket
+  CodeBuildProjectName:
+    Description: "CodeBuild project used by pipeline"
+    Value: !Ref SAMBuildProject
+  SecretName:
+    Description: "Secrets Manager secret name expected (contains GitHub PAT)"
+    Value: !Ref GitHubPATSecretName
