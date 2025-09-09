@@ -250,7 +250,7 @@ Resources:
   XRayResourcePolicyForSNS:
     Type: AWS::XRay::ResourcePolicy
     Properties:
-      PolicyName: AllowSNSXRayPutTraceSegments
+      PolicyName: !Sub "AllowSNSXRayPutTraceSegments-${AWS::StackName}"
       PolicyDocument: !Sub |
         {
           "Version": "2012-10-17",
