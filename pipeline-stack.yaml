@@ -13,7 +13,7 @@ Parameters:
   
   GitHubBranch:
     Type: String
-    Default: main
+    Default: stellios #main
     Description: "Branch the pipeline will watch"
   
   GitHubPATSecretName:
@@ -63,7 +63,7 @@ Resources:
         Type: CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:6.0
+        Image: aws/codebuild/standard:7.0
         Type: LINUX_CONTAINER
         EnvironmentVariables:
           - Name: ARTIFACT_BUCKET
@@ -78,7 +78,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                python: 3.11
+                python: 3.12
               commands:
                 - python -V
                 - pip install --upgrade pip
