@@ -89,10 +89,12 @@ Resources:
                 - echo "Running sam build..."
                 - sam build
                 - echo "Packaging into S3 bucket $ARTIFACT_BUCKET..."
-                - sam package --s3-bucket "$ARTIFACT_BUCKET" --output-template packaged-template.yaml
+                - sam package --template-file .aws-sam/build/template.yaml --s3-bucket "$ARTIFACT_BUCKET" --output-template-file packaged-template.yaml
+
           artifacts:
             files:
               - packaged-template.yaml
+
 
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
