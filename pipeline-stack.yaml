@@ -251,7 +251,7 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 StackName: !Ref DeployStackName
-                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 TemplatePath: BuildArtifact::packaged-template.yaml
                 RoleArn: !GetAtt CFNExecutionRole.Arn
 
