@@ -132,7 +132,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - iam:PassRole
-                Resource: "*"
+                Resource:
+                  - !GetAtt CFNExecutionRole.Arn
+
         - PolicyName: CodePipelineSecretsAccess
           PolicyDocument:
             Version: "2012-10-17"
@@ -142,6 +144,25 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource:
                   - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GitHubPATSecretName}*"
+
+
+  CFNExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${PipelineName}-CFNExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
 
   MyPipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -197,6 +218,8 @@ Resources:
                 StackName: !Ref DeployStackName
                 Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM
                 TemplatePath: BuildArtifact::packaged-template.yaml
+                RoleArn: !GetAtt CFNExecutionRole.Arn
+
 
 Outputs:
   PipelineName:
