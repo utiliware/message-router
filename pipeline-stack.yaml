@@ -306,7 +306,8 @@ Resources:
               commands:
                 - python -V
                 - pip install --upgrade pip
-                # instalar deps de tests si existe el archivo; si no, instala lo mínimo
+                - |
+                  export PYTHONPATH="$(pwd)/backend/src:$(pwd)/backend:$PYTHONPATH"
                 - if [ -f backend/tests/requirements.txt ]; then pip install -r backend/tests/requirements.txt; else echo "backend/tests/requirements.txt not found -> installing minimal test deps" && pip install pytest pytest-mock || exit 1; fi
                 # aws-sam-cli sólo si lo necesitas (E2E). Lo dejamos opcional porque tarda mucho.
                 - pip install aws-sam-cli || true
