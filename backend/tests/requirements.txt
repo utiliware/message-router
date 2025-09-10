@@ -1,3 +1,6 @@
 pytest
 boto3
 requests
+pytest-cov
+moto
+pytest-mock

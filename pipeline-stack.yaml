@@ -194,7 +194,6 @@ Resources:
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}/*"
 
 
-
   CFNExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -211,6 +210,144 @@ Resources:
       Path: "/"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AdministratorAccess
+
+
+  # Role usado por CodeBuild para el Test stage
+  SAMTestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${PipelineName}-SAMTestRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: SAMTestPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # 1) Permisos S3 para artefactos
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "${PipelineArtifactBucket.Arn}"
+                  - !Sub "${PipelineArtifactBucket.Arn}/*"
+              # 2) Permisos CloudFormation para stacks de test (crear/actualizar/borrar/describe)
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}-test-*/*"
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*"
+              # 3) Permisos para crear recursos comunes durante tests (Dynamo, S3, SNS, Lambda, IAM if needed)
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                  - s3:*
+                  - sns:*
+                  - sqs:*
+                  - lambda:*
+                  - events:*
+                  - cloudwatch:*
+                  - logs:*
+                Resource: "*"
+              # 4) Permitir pasar el CFN execution role a CloudFormation (si usas --role-arn)
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt CFNExecutionRole.Arn
+
+
+  SAMTestProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${PipelineName}-Test"
+      ServiceRole: !GetAtt SAMTestRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Value: !Ref PipelineArtifactBucket
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref "AWS::Region"
+          - Name: DEPLOY_STACK_NAME
+            Value: !Ref DeployStackName
+          - Name: CFN_EXECUTION_ROLE_ARN
+            Value: !GetAtt CFNExecutionRole.Arn
+          # control: si queremos correr E2E o no
+          - Name: RUN_E2E
+            Value: "false"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+
+          phases:
+            install:
+              runtime-versions:
+                python: 3.12
+              commands:
+                - python -V
+                - pip install --upgrade pip
+                - pip install -r backend/requirements-test.txt || true
+                - pip install aws-sam-cli || true
+            build:
+              commands:
+                - echo "Running unit tests..."
+                - pytest -q backend/tests/unit || exit 1
+                - echo "Running integration tests..."
+                - pytest -q backend/tests/integration || exit 1
+                - |
+                  if [ "$RUN_E2E" = "true" ]; then
+                    echo "RUN_E2E=true -> packaging and deploying test stack..."
+                    export TEST_STACK_NAME="${DEPLOY_STACK_NAME}-test-${CODEBUILD_BUILD_ID}"
+                    sam package --template-file .aws-sam/build/template.yaml --s3-bucket "$ARTIFACT_BUCKET" --output-template-file packaged-test-template.yaml
+                    aws cloudformation deploy \
+                      --template-file packaged-test-template.yaml \
+                      --stack-name "$TEST_STACK_NAME" \
+                      --capabilities CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND \
+                      --role-arn "$CFN_EXECUTION_ROLE_ARN"
+                    # obtener endpoint del stack temporal (si existe Output ApiUrl)
+                    API_URL=$(aws cloudformation describe-stacks --stack-name "$TEST_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+                    echo "API_URL: $API_URL"
+                    # ejecutar pruebas e2e (ejemplo)
+                    pytest -q backend/tests/e2e --api-url "$API_URL" || TEST_FAILED=1
+                    echo "Cleaning up test stack $TEST_STACK_NAME"
+                    aws cloudformation delete-stack --stack-name "$TEST_STACK_NAME"
+                    aws cloudformation wait stack-delete-complete --stack-name "$TEST_STACK_NAME"
+                    if [ -n "$TEST_FAILED" ]; then
+                      echo "E2E tests failed"
+                      exit 1
+                    fi
+                  else
+                    echo "RUN_E2E != true -> skipping E2E stage"
+                  fi
+          reports: {}
 
 
   MyPipeline:
@@ -252,6 +389,33 @@ Resources:
                 - Name: BuildArtifact
               Configuration:
                 ProjectName: !Ref SAMBuildProject
+
+        - Name: Test
+          Actions:
+            - Name: RunTests
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: BuildArtifact
+              Configuration:
+                ProjectName: !Ref SAMTestProject
+              RunOrder: 1
+
+        - Name: Approval
+          Actions:
+            - Name: ManualApproval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: "Revisar resultados de tests antes de desplegar a prod"
+              RunOrder: 1
+
         - Name: Deploy
           Actions:
             - Name: CFN_Deploy
