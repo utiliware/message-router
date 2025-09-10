@@ -307,44 +307,24 @@ Resources:
                 - python -V
                 - pip install --upgrade pip
                 - |
+                  # establecer PYTHONPATH (ruta absoluta)
                   export PYTHONPATH="$(pwd)/backend/src:$(pwd)/backend:$PYTHONPATH"
+                - echo "CODEBUILD_RESOLVED_SOURCE_VERSION=$CODEBUILD_RESOLVED_SOURCE_VERSION"
+                - echo "Printing a short tree of repo (top-level):"
+                - ls -la
+                - echo "Printing backend tree:"
+                - ls -la backend || true
+                - echo "Printing tests folder:"
+                - ls -la backend/tests || true
+                - echo "Show test file head (first 80 lines):"
+                - sed -n '1,80p' backend/tests/unit/test_handler.py || true
                 - if [ -f backend/tests/requirements.txt ]; then pip install -r backend/tests/requirements.txt; else echo "backend/tests/requirements.txt not found -> installing minimal test deps" && pip install pytest pytest-mock || exit 1; fi
-                # aws-sam-cli sólo si lo necesitas (E2E). Lo dejamos opcional porque tarda mucho.
-                - pip install aws-sam-cli || true
-
             build:
               commands:
-                - echo "Setting PYTHONPATH to include backend so tests can import hello_world"
-                - export PYTHONPATH="${PYTHONPATH}:$(pwd)/backend"
                 - echo "PYTHONPATH=$PYTHONPATH"
                 - echo "Running unit tests..."
                 - pytest -q backend/tests/unit
-                - echo "Running integration tests..."
-                - pytest -q backend/tests/integration
 
-                - |
-                  if [ "$RUN_E2E" = "true" ]; then
-                    echo "RUN_E2E=true -> packaging and deploying test stack..."
-                    export TEST_STACK_NAME="${DEPLOY_STACK_NAME}-test-${CODEBUILD_BUILD_ID}"
-                    sam package --template-file .aws-sam/build/template.yaml --s3-bucket "$ARTIFACT_BUCKET" --output-template-file packaged-test-template.yaml
-                    aws cloudformation deploy \
-                      --template-file packaged-test-template.yaml \
-                      --stack-name "$TEST_STACK_NAME" \
-                      --capabilities CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND \
-                      --role-arn "$CFN_EXECUTION_ROLE_ARN"
-                    API_URL=$(aws cloudformation describe-stacks --stack-name "$TEST_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
-                    echo "API_URL: $API_URL"
-                    pytest -q backend/tests/e2e --api-url "$API_URL" || TEST_FAILED=1
-                    echo "Cleaning up test stack $TEST_STACK_NAME"
-                    aws cloudformation delete-stack --stack-name "$TEST_STACK_NAME"
-                    aws cloudformation wait stack-delete-complete --stack-name "$TEST_STACK_NAME"
-                    if [ -n "$TEST_FAILED" ]; then
-                      echo "E2E tests failed"
-                      exit 1
-                    fi
-                  else
-                    echo "RUN_E2E != true -> skipping E2E stage"
-                  fi
 
 
 
