@@ -306,14 +306,18 @@ Resources:
               commands:
                 - python -V
                 - pip install --upgrade pip
-                - pip install -r backend/tests/requirements.txt || true
+                # instalar deps de tests si existe el archivo; si no, instala lo mínimo
+                - if [ -f backend/tests/requirements.txt ]; then pip install -r backend/tests/requirements.txt; else echo "backend/tests/requirements.txt not found -> installing minimal test deps" && pip install pytest pytest-mock || exit 1; fi
+                # aws-sam-cli sólo si lo necesitas (E2E). Lo dejamos opcional porque tarda mucho.
                 - pip install aws-sam-cli || true
+
             build:
               commands:
                 - echo "Running unit tests..."
-                - pytest -q backend/tests/unit || exit 1
+                - pytest -q backend/tests/unit
                 - echo "Running integration tests..."
-                - pytest -q backend/tests/integration || exit 1
+                - pytest -q backend/tests/integration
+
                 - |
                   if [ "$RUN_E2E" = "true" ]; then
                     echo "RUN_E2E=true -> packaging and deploying test stack..."
@@ -337,6 +341,7 @@ Resources:
                   else
                     echo "RUN_E2E != true -> skipping E2E stage"
                   fi
+
 
 
   MyPipeline:
