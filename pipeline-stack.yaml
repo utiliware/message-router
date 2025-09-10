@@ -313,6 +313,9 @@ Resources:
 
             build:
               commands:
+                - echo "Setting PYTHONPATH to include backend so tests can import hello_world"
+                - export PYTHONPATH="${PYTHONPATH}:$(pwd)/backend"
+                - echo "PYTHONPATH=$PYTHONPATH"
                 - echo "Running unit tests..."
                 - pytest -q backend/tests/unit
                 - echo "Running integration tests..."
