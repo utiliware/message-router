@@ -40,6 +40,7 @@ Resources:
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub "${PipelineName}-CodeBuildRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -98,6 +99,7 @@ Resources:
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub "${PipelineName}-Role"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -195,6 +197,7 @@ Resources:
   CFNExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub "${PipelineName}-CFNExecutionRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -209,7 +212,7 @@ Resources:
         - arn:aws:iam::aws:policy/AdministratorAccess
 
 
-  # Role usado por CodeBuild para el Test stage
+  # IAM role para el proyecto de tests
   SAMTestRole:
     Type: AWS::IAM::Role
     Properties:
@@ -228,7 +231,6 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # 1) Permisos S3 para artefactos
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -238,7 +240,6 @@ Resources:
                 Resource:
                   - !Sub "${PipelineArtifactBucket.Arn}"
                   - !Sub "${PipelineArtifactBucket.Arn}/*"
-              # 2) Permisos CloudFormation para stacks de test (crear/actualizar/borrar/describe)
               - Effect: Allow
                 Action:
                   - cloudformation:CreateStack
@@ -255,7 +256,6 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}-test-*/*"
                   - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*"
-              # 3) Permisos para crear recursos comunes durante tests (Dynamo, S3, SNS, Lambda, IAM if needed)
               - Effect: Allow
                 Action:
                   - dynamodb:*
@@ -267,21 +267,20 @@ Resources:
                   - cloudwatch:*
                   - logs:*
                 Resource: "*"
-              # 4) Permitir pasar el CFN execution role a CloudFormation (si usas --role-arn)
               - Effect: Allow
                 Action:
                   - iam:PassRole
                 Resource:
                   - !GetAtt CFNExecutionRole.Arn
 
-
+  # CodeBuild project para tests (usado por CodePipeline)
   SAMTestProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub "${PipelineName}-Test"
       ServiceRole: !GetAtt SAMTestRole.Arn
       Artifacts:
-        Type: NO_ARTIFACTS
+        Type: CODEPIPELINE          # <- IMPORTANT: must be CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
@@ -289,13 +288,10 @@ Resources:
         EnvironmentVariables:
           - Name: ARTIFACT_BUCKET
             Value: !Ref PipelineArtifactBucket
-          - Name: AWS_DEFAULT_REGION
-            Value: !Ref "AWS::Region"
           - Name: DEPLOY_STACK_NAME
             Value: !Ref DeployStackName
           - Name: CFN_EXECUTION_ROLE_ARN
             Value: !GetAtt CFNExecutionRole.Arn
-          # control: si queremos correr E2E o no
           - Name: RUN_E2E
             Value: "false"
       Source:
@@ -310,7 +306,7 @@ Resources:
               commands:
                 - python -V
                 - pip install --upgrade pip
-                - pip install -r backend/requirements-test.txt || true
+                - pip install -r backend/tests/requirements.txt || true
                 - pip install aws-sam-cli || true
             build:
               commands:
@@ -328,10 +324,8 @@ Resources:
                       --stack-name "$TEST_STACK_NAME" \
                       --capabilities CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND \
                       --role-arn "$CFN_EXECUTION_ROLE_ARN"
-                    # obtener endpoint del stack temporal (si existe Output ApiUrl)
                     API_URL=$(aws cloudformation describe-stacks --stack-name "$TEST_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
                     echo "API_URL: $API_URL"
-                    # ejecutar pruebas e2e (ejemplo)
                     pytest -q backend/tests/e2e --api-url "$API_URL" || TEST_FAILED=1
                     echo "Cleaning up test stack $TEST_STACK_NAME"
                     aws cloudformation delete-stack --stack-name "$TEST_STACK_NAME"
@@ -343,7 +337,6 @@ Resources:
                   else
                     echo "RUN_E2E != true -> skipping E2E stage"
                   fi
-          reports: {}
 
 
   MyPipeline:
@@ -398,18 +391,6 @@ Resources:
                 - Name: BuildArtifact
               Configuration:
                 ProjectName: !Ref SAMTestProject
-              RunOrder: 1
-
-        - Name: Approval
-          Actions:
-            - Name: ManualApproval
-              ActionTypeId:
-                Category: Approval
-                Owner: AWS
-                Provider: Manual
-                Version: '1'
-              Configuration:
-                CustomData: "Revisar resultados de tests antes de desplegar a prod"
               RunOrder: 1
 
         - Name: Deploy
