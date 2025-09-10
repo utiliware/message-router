@@ -40,7 +40,6 @@ Resources:
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${PipelineName}-CodeBuildRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -99,7 +98,6 @@ Resources:
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${PipelineName}-Role"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -197,7 +195,6 @@ Resources:
   CFNExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${PipelineName}-CFNExecutionRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -216,7 +213,6 @@ Resources:
   SAMTestRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${PipelineName}-SAMTestRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
