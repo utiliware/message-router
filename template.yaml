@@ -63,6 +63,40 @@ Resources:
     Properties:
       QueueName: MyMessageQueue
 
+  # -- SQS 2 Nuevo Hugo y Hiram ---
+  QueueTwoDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: message-router-queue-2-dlq
+
+  QueueTwo:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: message-router-queue-2
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt QueueTwoDLQ.Arn
+        maxReceiveCount: 5
+
+
+# --- Lambda Event Bridge -> SQS 2 ---
+  EBToSQS2Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/eb_to_sqs2/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref QueueTwo
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt QueueTwo.Arn
+        - AWSXRayDaemonWriteAccess
+
 
   # --- Lambda Dispatcher: SQS -> EventBridge ---
   LambdaDispatcher:
@@ -90,6 +124,7 @@ Resources:
 
 
   # --- EventBridge: Rule 1 -> SNS ---
+  #AGREGE TARGET NUEVO A mi SQ2
   EventRuleToSNS:
     Type: AWS::Events::Rule
     Properties:
@@ -105,6 +140,8 @@ Resources:
       Targets:
         - Arn: !Ref MySNSTopic
           Id: "SnsTarget"
+        - Arn: !GetAtt EBToSQS2Function.Arn # <---- Regla nueva
+          Id: "EBToSQS2LambdaTarget"
 
   # Policy that allows EventBridge to publish in SNS
   EventBridgeToSNSPolicy:
@@ -138,6 +175,16 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: sns.amazonaws.com
       SourceArn: !Ref MySNSTopic
+  
+  # Permission for EventBridge to invoke Lambda (new changes hiram hugo)
+  PermissionForEBInvokeEBToSQS2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EBToSQS2Function
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventRuleToSNS.Arn
+
 
   # SNS subscription to Lambda
   DynamoLambdaSubscription:
