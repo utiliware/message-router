@@ -60,4 +60,14 @@ manifest_hash = ""
 packagetype = "Zip"
 functions = ["EBToSQS2Function"]
 
+[function_build_definitions.72afdfff-556e-4eb4-a747-5733c2bd3b5c]
+codeuri = "C:\\Users\\Hiram\\Desktop\\HugoHiramAWS\\message-router\\backend\\src\\handlers\\sqs2_to_stepfn"
+runtime = "python3.12"
+architecture = "x86_64"
+handler = "app.lambda_handler"
+source_hash = "9a83a76d6cc78bde6f22738ae61bcd2f93bc0fbb1d43649277bd6b647e2f7511"
+manifest_hash = ""
+packagetype = "Zip"
+functions = ["SQS2ToStepFn"]
+
 [layer_build_definitions]

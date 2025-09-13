@@ -97,6 +97,34 @@ Resources:
             Resource: !GetAtt QueueTwo.Arn
         - AWSXRayDaemonWriteAccess
 
+  
+  # --- Lambda: SQS2 -> Step Functions (poller) ---
+  SQS2ToStepFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/sqs2_to_stepfn/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref QueueTwo
+          STATE_MACHINE_ARN: arn:aws:states:us-east-1:074597098296:stateMachine:Map-batch-StateMachineHiram
+      Policies:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+          - Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: arn:aws:states:us-east-1:074597098296:stateMachine:Map-batch-StateMachineHiram
+      Events:
+        FromSQS2:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt QueueTwo.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 10
+
+
 
   # --- Lambda Dispatcher: SQS -> EventBridge ---
   LambdaDispatcher:
@@ -184,6 +212,21 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt EventRuleToSNS.Arn
+    
+  StepFnOutputsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: StepFnOutputsRule
+      Description: "Eventos publicados por el Step Function (Map) -> SNS"
+      EventPattern:
+        source:
+            - "MyApp.StepFn"            # <--- Nuevo source
+        detail-type:
+            - "BatchItemProcessed"      # <--- Nuevo detail-type
+      Targets:
+          - Arn: !Ref MySNSTopic
+            Id: "SnsTargetForStepFnOutputs"
+
 
 
   # SNS subscription to Lambda
