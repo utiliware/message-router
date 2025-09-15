@@ -47,6 +47,20 @@ flowchart TD
     subgraph Llineth&Stellios
         LambdaS3["Lambda"] --> S3["S3 Bucket"]
     end
+
+    style APIGateway fill:#6237be
+    style SQS1 fill:#bc1356
+    style LambdaSamuel fill:#cf5b17
+    style EventBridge1 fill:#bc1356
+    style LambdaHugoHiram fill:#cf5b17
+    style SQS2 fill:#bc1356
+    style StepFunctions fill:#bc1356
+    style EventBridge2 fill:#bc1356
+    style SNSTopic fill:#bc1356
+    style LambdaRaul fill:#cf5b17
+    style DynamoDB fill:#3b42c2
+    style LambdaS3 fill:#cf5b17
+    style S3 fill:#337b1c
 ```
 
 # ReactApp
