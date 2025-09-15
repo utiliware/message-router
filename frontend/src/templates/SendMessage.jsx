@@ -26,7 +26,7 @@ function SendMessage() {
 
       // Llamamos a la Lambda vía API Gateway
       await axios.post(
-        "https://iq2br9ni35.execute-api.us-east-1.amazonaws.com/Prod/send", // Variable ENV
+        VITE_API_BASE, // Variable ENV
         payload,
         { headers: { "Content-Type": "application/json" } }
       );
