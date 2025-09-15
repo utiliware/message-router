@@ -21,13 +21,14 @@ BUCKET = os.environ.get('S3_BUCKET')
 def _convert_decimals(obj):
     if isinstance(obj, dict):
         return {k: _convert_decimals(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    elif isinstance(obj, list):
         return [_convert_decimals(v) for v in obj]
-    if isinstance(obj, Decimal):
+    elif isinstance(obj, Decimal):
         if obj % 1 == 0:
             return int(obj)
         return float(obj)
-    return obj
+    else:
+        return obj
 
 
 def _deserialize_map(dynamo_map):

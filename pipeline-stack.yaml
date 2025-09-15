@@ -13,7 +13,7 @@ Parameters:
   
   GitHubBranch:
     Type: String
-    Default: main
+    Default: stellios #main
     Description: "Branch the pipeline will watch"
   
   GitHubPATSecretName:
@@ -63,7 +63,7 @@ Resources:
         Type: CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:6.0
+        Image: aws/codebuild/standard:7.0
         Type: LINUX_CONTAINER
         EnvironmentVariables:
           - Name: ARTIFACT_BUCKET
@@ -78,7 +78,7 @@ Resources:
           phases:
             install:
               runtime-versions:
-                python: 3.11
+                python: 3.12
               commands:
                 - python -V
                 - pip install --upgrade pip
@@ -89,10 +89,12 @@ Resources:
                 - echo "Running sam build..."
                 - sam build
                 - echo "Packaging into S3 bucket $ARTIFACT_BUCKET..."
-                - sam package --s3-bucket "$ARTIFACT_BUCKET" --output-template packaged-template.yaml
+                - sam package --template-file .aws-sam/build/template.yaml --s3-bucket "$ARTIFACT_BUCKET" --output-template-file packaged-template.yaml
+
           artifacts:
             files:
               - packaged-template.yaml
+
 
   CodePipelineServiceRole:
     Type: AWS::IAM::Role
@@ -130,7 +132,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - iam:PassRole
-                Resource: "*"
+                Resource:
+                  - !GetAtt CFNExecutionRole.Arn
+
         - PolicyName: CodePipelineSecretsAccess
           PolicyDocument:
             Version: "2012-10-17"
@@ -140,6 +144,189 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource:
                   - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GitHubPATSecretName}*"
+        
+        - PolicyName: CodePipelineCloudFormationAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}/*"
+        
+        - PolicyName: CodePipelineCloudFormationCreateAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}/*"
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*"
+        
+        - PolicyName: CodePipelineCloudFormationDescribeEvents
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:ListStackResources
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}/*"
+
+
+  CFNExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${PipelineName}-CFNExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+
+  # IAM role for tests
+  SAMTestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: SAMTestPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "${PipelineArtifactBucket.Arn}"
+                  - !Sub "${PipelineArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${DeployStackName}-test-*/*"
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                  - s3:*
+                  - sns:*
+                  - sqs:*
+                  - lambda:*
+                  - events:*
+                  - cloudwatch:*
+                  - logs:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt CFNExecutionRole.Arn
+
+  # CodeBuild project for tests
+  SAMTestProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${PipelineName}-Test"
+      ServiceRole: !GetAtt SAMTestRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Value: !Ref PipelineArtifactBucket
+          - Name: DEPLOY_STACK_NAME
+            Value: !Ref DeployStackName
+          - Name: CFN_EXECUTION_ROLE_ARN
+            Value: !GetAtt CFNExecutionRole.Arn
+          - Name: RUN_E2E
+            Value: "false"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+
+          phases:
+            install:
+              runtime-versions:
+                python: 3.12
+              commands:
+                - python -V
+                - pip install --upgrade pip
+                - |
+                  # establecer PYTHONPATH (ruta absoluta)
+                  export PYTHONPATH="$(pwd)/backend/src:$(pwd)/backend:$PYTHONPATH"
+                - echo "CODEBUILD_RESOLVED_SOURCE_VERSION=$CODEBUILD_RESOLVED_SOURCE_VERSION"
+                - echo "Printing a short tree of repo (top-level):"
+                - ls -la
+                - echo "Printing backend tree:"
+                - ls -la backend || true
+                - echo "Printing tests folder:"
+                - ls -la backend/tests || true
+                - echo "Show test file head (first 80 lines):"
+                - sed -n '1,80p' backend/tests/unit/test_handler.py || true
+                - if [ -f backend/tests/requirements.txt ]; then pip install -r backend/tests/requirements.txt; else echo "backend/tests/requirements.txt not found -> installing minimal test deps" && pip install pytest pytest-mock || exit 1; fi
+            build:
+              commands:
+                - echo "PYTHONPATH=$PYTHONPATH"
+                - echo "Running unit tests..."
+                - pytest -q backend/tests/unit
+
+
+
 
   MyPipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -180,6 +367,21 @@ Resources:
                 - Name: BuildArtifact
               Configuration:
                 ProjectName: !Ref SAMBuildProject
+
+        - Name: Test
+          Actions:
+            - Name: RunTests
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              InputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                ProjectName: !Ref SAMTestProject
+              RunOrder: 1
+
         - Name: Deploy
           Actions:
             - Name: CFN_Deploy
@@ -193,8 +395,10 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 StackName: !Ref DeployStackName
-                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 TemplatePath: BuildArtifact::packaged-template.yaml
+                RoleArn: !GetAtt CFNExecutionRole.Arn
+
 
 Outputs:
   PipelineName:
