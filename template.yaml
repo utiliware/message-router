@@ -293,10 +293,10 @@ Resources:
                         "properties": {
                             "title": "SNS Messages Published",
                             "view": "gauge",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 300,
                             "metrics": [
-                                [ "AWS/SNS", "NumberOfMessagesPublished", "TopicName", "MyTargetTopic", { "stat": "Sum" } ]
+                                [ "AWS/SNS", "NumberOfMessagesPublished", "TopicName", "${MySNSTopicName}", { "stat": "Sum" } ]
                             ],
                             "yAxis": {
                                 "left": {
@@ -315,10 +315,10 @@ Resources:
                         "properties": {
                             "title": "S3 NumberOfObjects (TargetBucket)",
                             "view": "gauge",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 86400,
                             "metrics": [
-                                [ "AWS/S3", "NumberOfObjects", "BucketName", "message-router-targetbucket-wpumjnrwllns", "StorageType", "AllStorageTypes", { "stat": "Average" } ]
+                                [ "AWS/S3", "NumberOfObjects", "BucketName", "${TargetBucket}", "StorageType", "AllStorageTypes", { "stat": "Average" } ]
                             ],
                             "yAxis": {
                                 "left": {
@@ -337,13 +337,13 @@ Resources:
                         "properties": {
                             "title": "SQS Queue: visible / in-flight / sent",
                             "view": "timeSeries",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "MyMessageQueue", { "stat": "Average" } ],
-                                [ "AWS/SQS", "ApproximateNumberOfMessagesNotVisible", "QueueName", "MyMessageQueue", { "stat": "Average" } ],
-                                [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "MyMessageQueue", { "stat": "Sum" } ],
-                                [ "AWS/SQS", "NumberOfMessagesReceived", "QueueName", "MyMessageQueue", { "stat": "Sum" } ]
+                                [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${MessageQueue}", { "stat": "Average" } ],
+                                [ "AWS/SQS", "ApproximateNumberOfMessagesNotVisible", "QueueName", "${MessageQueue}", { "stat": "Average" } ],
+                                [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "${MessageQueue}", { "stat": "Sum" } ],
+                                [ "AWS/SQS", "NumberOfMessagesReceived", "QueueName", "${MessageQueue}", { "stat": "Sum" } ]
                             ]
                         }
                     },
@@ -356,12 +356,12 @@ Resources:
                         "properties": {
                             "title": "DynamoDB (MessagesTable): Consumed R/W & Throttles",
                             "view": "timeSeries",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "MessagesTable", { "stat": "Sum", "label": "read" } ],
-                                [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "MessagesTable", { "stat": "Sum", "label": "write" } ],
-                                [ "AWS/DynamoDB", "ThrottledRequests", "TableName", "MessagesTable", { "stat": "Sum", "label": "throttles" } ]
+                                [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${MessagesTable}", { "stat": "Sum", "label": "read" } ],
+                                [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${MessagesTable}", { "stat": "Sum", "label": "write" } ],
+                                [ "AWS/DynamoDB", "ThrottledRequests", "TableName", "${MessagesTable}", { "stat": "Sum", "label": "throttles" } ]
                             ]
                         }
                     },
@@ -374,13 +374,13 @@ Resources:
                         "properties": {
                             "title": "Lambda Errors",
                             "view": "table",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Sum" } ],
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-LambdaDispatcher-b9ViBTHEEQve", { "stat": "Sum" } ],
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-DynamoLambda-KQem1i54TFDn", { "stat": "Sum" } ],
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-DdbToS3Handler", { "stat": "Sum" } ]
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${ApiFunction}", { "stat": "Sum" } ],
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${LambdaDispatcher}", { "stat": "Sum" } ],
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${DynamoLambda}", { "stat": "Sum" } ],
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${DdbToS3Function}", { "stat": "Sum" } ]
                             ]
                         }
                     },
@@ -393,10 +393,10 @@ Resources:
                         "properties": {
                             "title": "Lambda Concurrency",
                             "view": "gauge",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Average" } ]
+                                [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${ApiFunction}", { "stat": "Average" } ]
                             ],
                             "yAxis": {
                                 "left": {
@@ -415,13 +415,13 @@ Resources:
                         "properties": {
                             "title": "Invocation distribution",
                             "view": "pie",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 300,
                             "metrics": [
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Sum", "label": "api_router" } ],
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-LambdaDispatcher-b9ViBTHEEQve", { "stat": "Sum", "label": "dispatcher" } ],
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-DynamoLambda-KQem1i54TFDn", { "stat": "Sum", "label": "dynamo_handler" } ],
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-DdbToS3Handler", { "stat": "Sum", "label": "ddb_to_s3" } ]
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${ApiFunction}", { "stat": "Sum", "label": "api_router" } ],
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${LambdaDispatcher}", { "stat": "Sum", "label": "dispatcher" } ],
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${DynamoLambda}", { "stat": "Sum", "label": "dynamo_handler" } ],
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${DdbToS3Function}", { "stat": "Sum", "label": "ddb_to_s3" } ]
                             ]
                         }
                     },
@@ -434,11 +434,11 @@ Resources:
                         "properties": {
                             "title": "Lambda Errors & Duration",
                             "view": "timeSeries",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Sum", "label": "errors_api" } ],
-                                [ "AWS/Lambda", "Duration", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Average", "label": "dur_api" } ]
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${ApiFunction}", { "stat": "Sum", "label": "errors_api" } ],
+                                [ "AWS/Lambda", "Duration", "FunctionName", "${ApiFunction}", { "stat": "Average", "label": "dur_api" } ]
                             ]
                         }
                     }
