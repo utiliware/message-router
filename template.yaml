@@ -19,7 +19,8 @@ Resources:
     Properties:
       ContentUri: dependencies/
       CompatibleRuntimes:
-        - python3.13
+        - python3.12
+
 
   # --- API Gateway with CORS ---
   MessageApi:
@@ -30,9 +31,10 @@ Resources:
       Cors:
         AllowMethods: "'OPTIONS,POST'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"
+        AllowOrigin: "'*'"   # For local testing; in production, specify your domain
 
-  # --- Lambda message router queue: API -> SQS ---
+
+  # --- Lambda messgae router queue: API -> SQS ---
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -54,70 +56,13 @@ Resources:
             Method: post
             RestApiId: !Ref MessageApi
 
+
   # --- SQS Queue ---
   MessageQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: MyMessageQueue
 
-  # -- SQS 2 Nuevo Hugo y Hiram ---
-  QueueTwoDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: message-router-queue-2-dlq
-
-  QueueTwo:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: message-router-queue-2
-      VisibilityTimeout: 60
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt QueueTwoDLQ.Arn
-        maxReceiveCount: 5
-
-  # --- Lambda EventBridge -> SQS 2 ---
-  EBToSQS2Function:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/eb_to_sqs2/
-      Handler: app.lambda_handler
-      Runtime: python3.13
-      Tracing: Active
-      Environment:
-        Variables:
-          QUEUE_URL: !Ref QueueTwo
-      Policies:
-        - Statement:
-            Effect: Allow
-            Action: sqs:SendMessage
-            Resource: !GetAtt QueueTwo.Arn
-        - AWSXRayDaemonWriteAccess
-
-  # --- Lambda: SQS2 -> Step Functions (poller) ---
-  SQS2ToStepFn:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/sqs2_to_stepfn/
-      Handler: app.lambda_handler
-      Runtime: python3.13
-      Tracing: Active
-      Environment:
-        Variables:
-          QUEUE_URL: !Ref QueueTwo
-          STATE_MACHINE_ARN: arn:aws:states:us-east-1:633697719065:stateMachine:Map-batch-StateMachineHiram
-      Policies:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
-        - Statement:
-            - Effect: Allow
-              Action: states:StartExecution
-              Resource: arn:aws:states:us-east-1:633697719065:stateMachine:Map-batch-StateMachineHiram
-      Events:
-        FromSQS2:
-          Type: SQS
-          Properties:
-            Queue: !GetAtt QueueTwo.Arn
-            BatchSize: 10
-            MaximumBatchingWindowInSeconds: 10
 
   # --- Lambda Dispatcher: SQS -> EventBridge ---
   LambdaDispatcher:
@@ -125,7 +70,7 @@ Resources:
     Properties:
       CodeUri: backend/src/handlers/lambda_dispatcher/
       Handler: app.lambda_handler
-      Runtime: python3.13
+      Runtime: python3.12
       Tracing: Active
       Policies:
         - SQSPollerPolicy:
@@ -143,12 +88,13 @@ Resources:
             Queue: !GetAtt MessageQueue.Arn
             BatchSize: 1
 
-  # --- EventBridge: Rule 1 -> SNS (+ Lambda EBToSQS2 como target) ---
+
+  # --- EventBridge: Rule 1 -> SNS ---
   EventRuleToSNS:
     Type: AWS::Events::Rule
     Properties:
       Name: SendToSNSRule
-      Description: "Regla de EventBridge que publica en SNS y Lambda EBToSQS2"
+      Description: "Regla de EventBridge que publica en SNS"
       EventPattern:
         source:
           - "MyApp"
@@ -159,8 +105,6 @@ Resources:
       Targets:
         - Arn: !Ref MySNSTopic
           Id: "SnsTarget"
-        - Arn: !GetAtt EBToSQS2Function.Arn
-          Id: "EBToSQS2LambdaTarget"
 
   # Policy that allows EventBridge to publish in SNS
   EventBridgeToSNSPolicy:
@@ -178,6 +122,7 @@ Resources:
             Action: sns:Publish
             Resource: !Ref MySNSTopic
 
+
   # --- SNS Topic ---
   MySNSTopic:
     Type: AWS::SNS::Topic
@@ -194,36 +139,6 @@ Resources:
       Principal: sns.amazonaws.com
       SourceArn: !Ref MySNSTopic
 
-  # Permission for EventBridge to invoke Lambda (EBToSQS2)
-  PermissionForEBInvokeEBToSQS2:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref EBToSQS2Function
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt EventRuleToSNS.Arn
-
-  # --- EventBridge: Regla 2 (eventos nativos de Step Functions) ---
-  StepFnOutputsRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: StepFnOutputsRule
-      Description: "Captura cambios de estado del Step Functions (SUCCEEDED/FAILED) y los envía a SNS"
-      EventPattern:
-        source:
-          - aws.states
-        detail-type:
-          - Step Functions Execution Status Change
-        detail:
-          stateMachineArn:
-            - arn:aws:states:us-east-1:633697719065:stateMachine:Map-batch-StateMachineHiram
-          status:
-            - SUCCEEDED
-            - FAILED
-      Targets:
-        - Arn: !Ref MySNSTopic
-          Id: "SnsTargetForStepFnOutputs"
-
   # SNS subscription to Lambda
   DynamoLambdaSubscription:
     Type: AWS::SNS::Subscription
@@ -232,7 +147,6 @@ Resources:
       Protocol: lambda
       Endpoint: !GetAtt DynamoLambda.Arn
       TopicArn: !Ref MySNSTopic
-
   # --- Lambda Dynamo: SNS -> DynamoDB ---
   DynamoLambda:
     Type: AWS::Serverless::Function
