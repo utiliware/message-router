@@ -5,7 +5,7 @@ Description: Messages betwen services using API Gateway, Lambda, SQS, EventBridg
 Globals:
   Function:
     Timeout: 10
-    Runtime: python3.13
+    Runtime: python3.12
     Layers:
       - !Ref CommonDependenciesLayer
   Api:
