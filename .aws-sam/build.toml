@@ -45,4 +45,22 @@ manifest_hash = ""
 packagetype = "Zip"
 functions = ["MetricsFunction"]
 
+[function_build_definitions.abdadf4f-dd40-4656-b4d3-bb3e828f0745]
+codeuri = "/mnt/data/Documents/aws_certification/work/aws_meetup/message-router/backend/src/handlers/eb_to_sqs2"
+runtime = "python3.12"
+architecture = "x86_64"
+handler = "app.lambda_handler"
+manifest_hash = "80d78164c55d67fe3ee7059636b54488"
+packagetype = "Zip"
+functions = ["EBToSQS2Function"]
+
+[function_build_definitions.5254b8e0-401d-4f58-a747-ed491bd9ffdc]
+codeuri = "/mnt/data/Documents/aws_certification/work/aws_meetup/message-router/backend/src/handlers/sqs2_to_stepfn"
+runtime = "python3.12"
+architecture = "x86_64"
+handler = "app.lambda_handler"
+manifest_hash = ""
+packagetype = "Zip"
+functions = ["SQS2ToStepFn"]
+
 [layer_build_definitions]

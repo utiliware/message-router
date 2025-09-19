@@ -1,6 +1,26 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Messages betwen services using API Gateway, Lambda, SQS, EventBridge, SNS, DynamoDB and S3 with monitoring via CloudWatch and X-Ray
+Description: Messages between services using API Gateway, Lambda, SQS, EventBridge, SNS, DynamoDB and S3 with monitoring via CloudWatch and X-Ray
+
+Parameters:
+  MessageQueueName:
+    Type: String
+    Default: MyMessageQueue
+  QueueTwoName:
+    Type: String
+    Default: message-router-queue-2
+  QueueTwoDLQName:
+    Type: String
+    Default: message-router-queue-2-dlq
+  SNSTopicName:
+    Type: String
+    Default: MyTargetTopic
+  MessagesTableName:
+    Type: String
+    Default: MessagesTable
+  S3BucketName:
+    Type: String
+    Default: target-bucket
 
 Globals:
   Function:
@@ -9,7 +29,7 @@ Globals:
     Layers:
       - !Ref CommonDependenciesLayer
   Api:
-    TracingEnabled: true   
+    TracingEnabled: true
 
 Resources:
 
@@ -21,7 +41,6 @@ Resources:
       CompatibleRuntimes:
         - python3.12
 
-
   # --- API Gateway with CORS ---
   MessageApi:
     Type: AWS::Serverless::Api
@@ -31,8 +50,13 @@ Resources:
       Cors:
         AllowMethods: "'OPTIONS,POST'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"   # For local testing; in production, specify your domain
+        AllowOrigin: "'*'"
 
+  # --- SQS Queue (API -> SQS1) ---
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref MessageQueueName
 
   # --- Lambda messgae router queue: API -> SQS ---
   ApiFunction:
@@ -56,15 +80,7 @@ Resources:
             Method: post
             RestApiId: !Ref MessageApi
 
-
-  # --- SQS Queue ---
-  MessageQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: MyMessageQueue
-
-
-  # --- Lambda Dispatcher: SQS -> EventBridge ---
+  # --- Lambda Dispatcher: SQS1 -> EventBridge ---
   LambdaDispatcher:
     Type: AWS::Serverless::Function
     Properties:
@@ -72,6 +88,9 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.12
       Tracing: Active
+      Environment:
+        Variables:
+          EVENT_BUS_NAME: default
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt MessageQueue.QueueName
@@ -79,7 +98,7 @@ Resources:
             Effect: Allow
             Action:
               - events:PutEvents
-            Resource: "*"
+            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"
         - AWSXRayDaemonWriteAccess
       Events:
         SQSTrigger:
@@ -88,23 +107,151 @@ Resources:
             Queue: !GetAtt MessageQueue.Arn
             BatchSize: 1
 
-
-  # --- EventBridge: Rule 1 -> SNS ---
-  EventRuleToSNS:
+  # --- EventBridge Rule 1: messages from LambdaDispatcher -> EBToSQS2Function ---
+  MessageReceivedRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: SendToSNSRule
-      Description: "Regla de EventBridge que publica en SNS"
+      Name: MessageReceivedRule
+      Description: "Regla para capturar eventos emitidos por LambdaDispatcher"
       EventPattern:
         source:
-          - "MyApp"
-          - "my.custom.source"
+          - my.app.messages
         detail-type:
-          - "PlainText"
-          - "MyEvent"
+          - MessageReceived
+      Targets:
+        - Arn: !GetAtt EBToSQS2Function.Arn
+          Id: "EBToSQS2LambdaTarget"
+
+  # Permission for EventBridge to invoke EBToSQS2Function
+  PermissionForEventsInvokeEBToSQS2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EBToSQS2Function
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MessageReceivedRule.Arn
+
+  # --- Lambda: EventBridge Rule 1 -> SQS 2 ---
+  EBToSQS2Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/eb_to_sqs2/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref QueueTwo
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt QueueTwo.Arn
+        - AWSXRayDaemonWriteAccess
+
+  # -- SQS 2 and DLQ ---
+  QueueTwoDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueTwoDLQName
+
+  QueueTwo:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref QueueTwoName
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt QueueTwoDLQ.Arn
+        maxReceiveCount: 5
+
+  # --- IAM Role para Step Functions (ejecución) ---
+  StepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: StepFunctionsLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # --- State Machine definida en el mismo stack (CloudFormation native) ---
+  MyStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
+      DefinitionString: |
+        {
+          "Comment": "State machine mínima para pipeline",
+          "StartAt": "PassState",
+          "States": {
+            "PassState": {
+              "Type": "Pass",
+              "Result": {"status":"ok"},
+              "End": true
+            }
+          }
+        }
+
+  # --- Lambda: SQS 2 -> Step Functions (poller) ---
+  SQS2ToStepFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/sqs2_to_stepfn/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref QueueTwo
+          STATE_MACHINE_ARN: !GetAtt MyStateMachine.Arn
+      Policies:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !GetAtt MyStateMachine.Arn
+      Events:
+        FromSQS2:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt QueueTwo.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 10
+
+  # --- EventBridge: Rule 2 -> SNS (captura ejecuciones SFN) ---
+  StepFnOutputsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: StepFnOutputsRule
+      Description: "Captura cambios de estado del Step Functions (SUCCEEDED/FAILED) y los envía a SNS"
+      EventPattern:
+        source:
+          - aws.states
+        detail-type:
+          - Step Functions Execution Status Change
+        detail:
+          stateMachineArn:
+            - !GetAtt MyStateMachine.Arn
+          status:
+            - SUCCEEDED
+            - FAILED
       Targets:
         - Arn: !Ref MySNSTopic
-          Id: "SnsTarget"
+          Id: "SnsTargetForStepFnOutputs"
 
   # Policy that allows EventBridge to publish in SNS
   EventBridgeToSNSPolicy:
@@ -122,15 +269,14 @@ Resources:
             Action: sns:Publish
             Resource: !Ref MySNSTopic
 
-
   # --- SNS Topic ---
   MySNSTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: MyTargetTopic
+      TopicName: !Ref SNSTopicName
       TracingConfig: 'Active'
 
-  # Permissions for SNS to invoke Lambda
+  # Permission for SNS to invoke DynamoLambda
   PermissionForSNSInvokeLambda:
     Type: AWS::Lambda::Permission
     Properties:
@@ -148,7 +294,6 @@ Resources:
       Endpoint: !GetAtt DynamoLambda.Arn
       TopicArn: !Ref MySNSTopic
 
-
   # --- Lambda Dynamo: SNS -> DynamoDB ---
   DynamoLambda:
     Type: AWS::Serverless::Function
@@ -165,12 +310,11 @@ Resources:
             TableName: !Ref MessagesTable
         - AWSXRayDaemonWriteAccess
 
-
   # --- DynamoDB ---
   MessagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: MessagesTable
+      TableName: !Ref MessagesTableName
       AttributeDefinitions:
         - AttributeName: MessageId
           AttributeType: S
@@ -181,7 +325,6 @@ Resources:
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
 
-
   # --- Lambda DDB to S3: DynamoDB -> S3 ---
   DdbToS3Function:
     Type: AWS::Serverless::Function
@@ -189,8 +332,8 @@ Resources:
       FunctionName: !Sub '${AWS::StackName}-DdbToS3Handler'
       Handler: app.lambda_handler
       Tracing: Active
-      CodeUri: backend/src/handlers/lambda_ddb_to_s3/   
-      Timeout: 30      
+      CodeUri: backend/src/handlers/lambda_ddb_to_s3/
+      Timeout: 30
       Environment:
         Variables:
           S3_BUCKET: !Ref TargetBucket
@@ -200,19 +343,17 @@ Resources:
           Properties:
             Stream: !GetAtt MessagesTable.StreamArn
             BatchSize: 1
-            StartingPosition: LATEST 
+            StartingPosition: LATEST
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref MessagesTable
         - S3WritePolicy:
             BucketName: !Ref TargetBucket
         - AWSXRayDaemonWriteAccess
-
-
+  
   # --- S3 Bucket ---
   TargetBucket:
     Type: AWS::S3::Bucket
-
 
   # --- API Gateway para métricas ---
   MetricsApi:
@@ -224,7 +365,6 @@ Resources:
         AllowMethods: "'OPTIONS,GET'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
-
 
   # --- Lambda que expone métricas ---
   MetricsFunction:
@@ -244,7 +384,6 @@ Resources:
             Path: /metrics
             Method: get
             RestApiId: !Ref MetricsApi
-
 
   # X-Ray resource policy para SNS
   XRayResourcePolicyForSNS:
@@ -273,7 +412,6 @@ Resources:
           ]
         }
 
-
   # --- Dashboard ---
   CloudWatchDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -293,10 +431,10 @@ Resources:
                         "properties": {
                             "title": "SNS Messages Published",
                             "view": "gauge",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 300,
                             "metrics": [
-                                [ "AWS/SNS", "NumberOfMessagesPublished", "TopicName", "MyTargetTopic", { "stat": "Sum" } ]
+                                [ "AWS/SNS", "NumberOfMessagesPublished", "TopicName", "${MySNSTopicName}", { "stat": "Sum" } ]
                             ],
                             "yAxis": {
                                 "left": {
@@ -315,10 +453,10 @@ Resources:
                         "properties": {
                             "title": "S3 NumberOfObjects (TargetBucket)",
                             "view": "gauge",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 86400,
                             "metrics": [
-                                [ "AWS/S3", "NumberOfObjects", "BucketName", "message-router-targetbucket-wpumjnrwllns", "StorageType", "AllStorageTypes", { "stat": "Average" } ]
+                                [ "AWS/S3", "NumberOfObjects", "BucketName", "${TargetBucket}", "StorageType", "AllStorageTypes", { "stat": "Average" } ]
                             ],
                             "yAxis": {
                                 "left": {
@@ -337,13 +475,13 @@ Resources:
                         "properties": {
                             "title": "SQS Queue: visible / in-flight / sent",
                             "view": "timeSeries",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "MyMessageQueue", { "stat": "Average" } ],
-                                [ "AWS/SQS", "ApproximateNumberOfMessagesNotVisible", "QueueName", "MyMessageQueue", { "stat": "Average" } ],
-                                [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "MyMessageQueue", { "stat": "Sum" } ],
-                                [ "AWS/SQS", "NumberOfMessagesReceived", "QueueName", "MyMessageQueue", { "stat": "Sum" } ]
+                                [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${MessageQueue}", { "stat": "Average" } ],
+                                [ "AWS/SQS", "ApproximateNumberOfMessagesNotVisible", "QueueName", "${MessageQueue}", { "stat": "Average" } ],
+                                [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "${MessageQueue}", { "stat": "Sum" } ],
+                                [ "AWS/SQS", "NumberOfMessagesReceived", "QueueName", "${MessageQueue}", { "stat": "Sum" } ]
                             ]
                         }
                     },
@@ -356,12 +494,12 @@ Resources:
                         "properties": {
                             "title": "DynamoDB (MessagesTable): Consumed R/W & Throttles",
                             "view": "timeSeries",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "MessagesTable", { "stat": "Sum", "label": "read" } ],
-                                [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "MessagesTable", { "stat": "Sum", "label": "write" } ],
-                                [ "AWS/DynamoDB", "ThrottledRequests", "TableName", "MessagesTable", { "stat": "Sum", "label": "throttles" } ]
+                                [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${MessagesTable}", { "stat": "Sum", "label": "read" } ],
+                                [ "AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "${MessagesTable}", { "stat": "Sum", "label": "write" } ],
+                                [ "AWS/DynamoDB", "ThrottledRequests", "TableName", "${MessagesTable}", { "stat": "Sum", "label": "throttles" } ]
                             ]
                         }
                     },
@@ -374,13 +512,13 @@ Resources:
                         "properties": {
                             "title": "Lambda Errors",
                             "view": "table",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Sum" } ],
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-LambdaDispatcher-b9ViBTHEEQve", { "stat": "Sum" } ],
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-DynamoLambda-KQem1i54TFDn", { "stat": "Sum" } ],
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-DdbToS3Handler", { "stat": "Sum" } ]
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${ApiFunction}", { "stat": "Sum" } ],
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${LambdaDispatcher}", { "stat": "Sum" } ],
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${DynamoLambda}", { "stat": "Sum" } ],
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${DdbToS3Function}", { "stat": "Sum" } ]
                             ]
                         }
                     },
@@ -393,10 +531,10 @@ Resources:
                         "properties": {
                             "title": "Lambda Concurrency",
                             "view": "gauge",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Average" } ]
+                                [ "AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${ApiFunction}", { "stat": "Average" } ]
                             ],
                             "yAxis": {
                                 "left": {
@@ -415,13 +553,13 @@ Resources:
                         "properties": {
                             "title": "Invocation distribution",
                             "view": "pie",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 300,
                             "metrics": [
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Sum", "label": "api_router" } ],
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-LambdaDispatcher-b9ViBTHEEQve", { "stat": "Sum", "label": "dispatcher" } ],
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-DynamoLambda-KQem1i54TFDn", { "stat": "Sum", "label": "dynamo_handler" } ],
-                                [ "AWS/Lambda", "Invocations", "FunctionName", "message-router-DdbToS3Handler", { "stat": "Sum", "label": "ddb_to_s3" } ]
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${ApiFunction}", { "stat": "Sum", "label": "api_router" } ],
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${LambdaDispatcher}", { "stat": "Sum", "label": "dispatcher" } ],
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${DynamoLambda}", { "stat": "Sum", "label": "dynamo_handler" } ],
+                                [ "AWS/Lambda", "Invocations", "FunctionName", "${DdbToS3Function}", { "stat": "Sum", "label": "ddb_to_s3" } ]
                             ]
                         }
                     },
@@ -434,11 +572,11 @@ Resources:
                         "properties": {
                             "title": "Lambda Errors & Duration",
                             "view": "timeSeries",
-                            "region": "us-east-1",
+                            "region": "${Region}",
                             "period": 60,
                             "metrics": [
-                                [ "AWS/Lambda", "Errors", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Sum", "label": "errors_api" } ],
-                                [ "AWS/Lambda", "Duration", "FunctionName", "message-router-ApiFunction-mMVIVhNW0iz2", { "stat": "Average", "label": "dur_api" } ]
+                                [ "AWS/Lambda", "Errors", "FunctionName", "${ApiFunction}", { "stat": "Sum", "label": "errors_api" } ],
+                                [ "AWS/Lambda", "Duration", "FunctionName", "${ApiFunction}", { "stat": "Average", "label": "dur_api" } ]
                             ]
                         }
                     }
