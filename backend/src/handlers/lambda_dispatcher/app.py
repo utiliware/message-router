@@ -27,11 +27,12 @@ def lambda_handler(event, context):
 
         # Crear el evento para EventBridge
         entries.append({
-            'Source': 'MyApp',            # Debe coincidir exactamente con EventPattern
-            'DetailType': 'PlainText',          # Puedes cambiar el tipo si quieres
-            'Detail': json.dumps(data),              # El contenido del evento
-            'EventBusName': 'default'                # Bus default
+            'Source': 'my.app.messages',           # debe coincidir con EventPattern.source
+            'DetailType': 'MessageReceived',       # debe coincidir con EventPattern.detail-type
+            'Detail': json.dumps(data, ensure_ascii=False),  # string con JSON
+            'EventBusName': os.environ.get('EVENT_BUS_NAME', 'default')
         })
+
 
     if entries:
         response = eventbridge.put_events(Entries=entries)
