@@ -412,6 +412,7 @@ Resources:
           ]
         }
 
+
   # --- Dashboard ---
   CloudWatchDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -613,3 +614,4 @@ Outputs:
   MetricsApiUrl:
     Description: "API Gateway endpoint para métricas"
     Value: !Sub "https://${MetricsApi}.execute-api.${AWS::Region}.amazonaws.com/MetricsStage/metrics"
+

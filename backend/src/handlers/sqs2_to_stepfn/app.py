@@ -7,8 +7,10 @@ patch_all()
 sfn = boto3.client("stepfunctions")
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "").strip()
 
+
 log = logging.getLogger()
 log.setLevel(logging.INFO)
+
 
 def _safe_start_execution(payload):
     resp = sfn.start_execution(
@@ -26,6 +28,7 @@ def _safe_start_execution(payload):
         }
     }
     return safe
+
 
 def lambda_handler(event, context):
     records = event.get("Records", [])
@@ -57,3 +60,4 @@ def lambda_handler(event, context):
         log.exception("Error arrancando StepFunction: %s", e)
         # No lanzar excepción; devolver error serializable (si quieres forzar retry, lanza la excepción en vez de devolver)
         return {"ok": False, "count": len(messages), "error": str(e)}
+

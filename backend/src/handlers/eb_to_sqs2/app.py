@@ -9,6 +9,7 @@ patch_all()
 sqs = boto3.client("sqs")
 QUEUE_URL = os.environ["QUEUE_URL"]  # Inyeccion desde sam a queue 2
 
+
 def lambda_handler(event, context):
     try:
         detail = event.get("detail", {})

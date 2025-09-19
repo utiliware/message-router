@@ -16,6 +16,10 @@ lint = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+stack_name = "message-router-hiram-dev"
+s3_prefix = "message-router-hiram-dev"
+region = "us-east-1"
+image_repositories = []
 
 [default.package.parameters]
 resolve_s3 = true
