@@ -26,7 +26,7 @@ function SendMessage() {
 
       // Llamamos a la Lambda vía API Gateway
       await axios.post(
-        VITE_API_BASE, // Variable ENV
+        "https://id0kr83xli.execute-api.us-east-1.amazonaws.com/Prod/send", // Variable ENV
         payload,
         { headers: { "Content-Type": "application/json" } }
       );
@@ -36,13 +36,13 @@ function SendMessage() {
         type: "success",
         text:
           count > 1
-            ? `Se enviaron ${count} mensajes exitosamente`
-            : "Mensaje enviado exitosamente",
+            ? `${count} messages were sent successfully`
+            : "Message sent successfully",
       });
     } catch (err) {
       setStatus({
         type: "error",
-        text: "Error al enviar el mensaje. Intenta de nuevo.",
+        text: "Error sending message. Please try again.",
       });
     }
   };
@@ -54,11 +54,11 @@ function SendMessage() {
         <Card variant="outlined" sx={{ p: 3 }}>
           <CardContent>
             <Typography level="h4" gutterBottom>
-              Enviar Mensaje
+              Send Message
             </Typography>
 
             <Input
-              placeholder="Escribe tu mensaje..."
+              placeholder="Write your message..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               sx={{ mb: 2 }}
@@ -66,7 +66,7 @@ function SendMessage() {
 
             <Input
               type="number"
-              placeholder="Cantidad de mensajes"
+              placeholder="Number of messages"
               value={count}
               onChange={(e) => setCount(Number(e.target.value))}
               sx={{ mb: 2 }}
@@ -74,7 +74,7 @@ function SendMessage() {
             />
 
             <Button onClick={handleSend} disabled={!message.trim()}>
-              Enviar
+              Send
             </Button>
 
             {status && (
