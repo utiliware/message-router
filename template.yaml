@@ -79,7 +79,7 @@ Resources:
         maxReceiveCount: 5
 
 
-# --- Lambda Event Bridge -> SQS 2 ---
+# --- Lambda -> SQS 2 ---
   EBToSQS2Function:
     Type: AWS::Serverless::Function
     Properties:
