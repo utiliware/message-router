@@ -183,28 +183,78 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+                  # Acciones recomendadas por la doc + extras útiles
+                  - logs:CreateLogGroup
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                  - logs:PutDestination
+                  - logs:PutDestinationPolicy
+                  - logs:AssociateKmsKey
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-MyStateMachine:*"
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: "*"
+        - PolicyName: StepFunctionsExecutionBase
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: '*'
 
-  # --- State Machine definida en el mismo stack (CloudFormation native) ---
+
+  # LogGroup para los logs de Step Functions (CloudWatch)
+  MyStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-MyStateMachine"
+      RetentionInDays: 14
+
+  # State Machine (CloudFormation nativa) - soporta LoggingConfiguration
   MyStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
+      TracingConfiguration:
+        Enabled: true
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt MyStateMachineLogGroup.Arn
       DefinitionString: |
         {
-          "Comment": "State machine mínima para pipeline",
+          "Comment": "State machine mínima para pipeline preservando input",
           "StartAt": "PassState",
           "States": {
             "PassState": {
               "Type": "Pass",
               "Result": {"status":"ok"},
+              "ResultPath": "$.status",
               "End": true
             }
           }
         }
+
 
   # --- Lambda: SQS 2 -> Step Functions (poller) ---
   SQS2ToStepFn:
@@ -217,20 +267,21 @@ Resources:
       Environment:
         Variables:
           QUEUE_URL: !Ref QueueTwo
-          STATE_MACHINE_ARN: !GetAtt MyStateMachine.Arn
+          STATE_MACHINE_ARN: !Ref MyStateMachine
       Policies:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+        - AWSXRayDaemonWriteAccess 
         - Statement:
             - Effect: Allow
               Action: states:StartExecution
-              Resource: !GetAtt MyStateMachine.Arn
+              Resource: !Ref MyStateMachine
       Events:
         FromSQS2:
           Type: SQS
           Properties:
             Queue: !GetAtt QueueTwo.Arn
             BatchSize: 10
-            MaximumBatchingWindowInSeconds: 10
+            MaximumBatchingWindowInSeconds: 0
 
   # --- EventBridge: Rule 2 -> SNS (captura ejecuciones SFN) ---
   StepFnOutputsRule:
@@ -245,7 +296,7 @@ Resources:
           - Step Functions Execution Status Change
         detail:
           stateMachineArn:
-            - !GetAtt MyStateMachine.Arn
+            - !Ref MyStateMachine
           status:
             - SUCCEEDED
             - FAILED
