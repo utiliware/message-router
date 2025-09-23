@@ -49,17 +49,17 @@ flowchart TD
     end
 
     style Message fill:#e6b8af,stroke:#a61c00,stroke-width:2px,color:#000
-    style APIGateway fill:#e69138,stroke:#783f04,stroke-width:2px,color:#000
-    style SQS1 fill:#f1c232,stroke:#7f6000,stroke-width:2px,color:#000
-    style LambdaSamuel fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
-    style EventBridge1 fill:#6d9eeb,stroke:#073763,stroke-width:2px,color:#000
-    style LambdaHugoHiram fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
-    style SQS2 fill:#f1c232,stroke:#7f6000,stroke-width:2px,color:#000
-    style StepFunctions fill:#8e7cc3,stroke:#351c75,stroke-width:2px,color:#000
-    style EventBridge2 fill:#6d9eeb,stroke:#073763,stroke-width:2px,color:#000
-    style SNSTopic fill:#e69138,stroke:#783f04,stroke-width:2px,color:#000
-    style LambdaRaul fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
-    style DynamoDB fill:#3d85c6,stroke:#0b5394,stroke-width:2px,color:#fff
-    style LambdaS3 fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
-    style S3 fill:#3c78d8,stroke:#073763,stroke-width:2px,color:#fff
+    style APIGateway fill:#6237be
+    style SQS1 fill:#bc1356
+    style LambdaSamuel fill:#cf5b17
+    style EventBridge1 fill:#bc1356
+    style LambdaHugoHiram fill:#cf5b17
+    style SQS2 fill:#bc1356
+    style StepFunctions fill:#bc1356
+    style EventBridge2 fill:#bc1356
+    style SNSTopic fill:#bc1356
+    style LambdaRaul fill:#cf5b17
+    style DynamoDB fill:#3b42c2
+    style LambdaS3 fill:#cf5b17
+    style S3 fill:#337b1c
 ```
