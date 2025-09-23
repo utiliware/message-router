@@ -1,3 +1,4 @@
+``` mermaid
 flowchart TD
     Message([Message]) --> Angel
     
@@ -46,3 +47,4 @@ flowchart TD
     subgraph Llineth_Stellios["Llineth & Stellios"]
         LambdaS3["Lambda"] --> S3["S3 Bucket"]
     end
+```
