@@ -5,19 +5,25 @@ Description: Messages between services using API Gateway, Lambda, SQS, EventBrid
 Parameters:
   MessageQueueName:
     Type: String
-    Default: MyMessageQueue
+    Default: sqs-1
+  EventBridgeOneName:
+    Type: String
+    Default: rule-1
   QueueTwoName:
     Type: String
-    Default: message-router-queue-2
+    Default: sqs-2
   QueueTwoDLQName:
     Type: String
-    Default: message-router-queue-2-dlq
+    Default: sqs-2-dlq
+  EventBridgeTwoName:
+    Type: String
+    Default: rule-2
   SNSTopicName:
     Type: String
-    Default: MyTargetTopic
+    Default: sns-target-topic
   MessagesTableName:
     Type: String
-    Default: MessagesTable
+    Default: messages-table
   S3BucketName:
     Type: String
     Default: target-bucket
@@ -111,8 +117,8 @@ Resources:
   MessageReceivedRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: MessageReceivedRule
-      Description: "Regla para capturar eventos emitidos por LambdaDispatcher"
+      Name: !Ref EventBridgeOneName
+      Description: "Rule for capturing events emitted by LambdaDispatcher"
       EventPattern:
         source:
           - my.app.messages
@@ -204,7 +210,7 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-MyStateMachine:*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-MessageProcessingStateMachine:*"
               - Effect: Allow
                 Action:
                   - sts:AssumeRole
@@ -222,14 +228,14 @@ Resources:
 
 
   # LogGroup para los logs de Step Functions (CloudWatch)
-  MyStateMachineLogGroup:
+  MessageProcessingStateMachineLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-MyStateMachine"
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-MessageProcessingStateMachine"
       RetentionInDays: 14
 
   # State Machine (CloudFormation nativa) - soporta LoggingConfiguration
-  MyStateMachine:
+  MessageProcessingStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       RoleArn: !GetAtt StepFunctionsExecutionRole.Arn
@@ -240,10 +246,10 @@ Resources:
         IncludeExecutionData: true
         Destinations:
           - CloudWatchLogsLogGroup:
-              LogGroupArn: !GetAtt MyStateMachineLogGroup.Arn
+              LogGroupArn: !GetAtt MessageProcessingStateMachineLogGroup.Arn
       DefinitionString: |
         {
-          "Comment": "State machine mínima para pipeline preservando input",
+          "Comment": "Minimal state machine for pipeline preserving input",
           "StartAt": "PassState",
           "States": {
             "PassState": {
@@ -267,14 +273,14 @@ Resources:
       Environment:
         Variables:
           QUEUE_URL: !Ref QueueTwo
-          STATE_MACHINE_ARN: !Ref MyStateMachine
+          STATE_MACHINE_ARN: !Ref MessageProcessingStateMachine
       Policies:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
         - AWSXRayDaemonWriteAccess 
         - Statement:
             - Effect: Allow
               Action: states:StartExecution
-              Resource: !Ref MyStateMachine
+              Resource: !Ref MessageProcessingStateMachine
       Events:
         FromSQS2:
           Type: SQS
@@ -287,8 +293,8 @@ Resources:
   StepFnOutputsRule:
     Type: AWS::Events::Rule
     Properties:
-      Name: StepFnOutputsRule
-      Description: "Captura cambios de estado del Step Functions (SUCCEEDED/FAILED) y los envía a SNS"
+      Name: !Ref EventBridgeTwoName
+      Description: "Captures Step Functions status changes (SUCCEEDED/FAILED) and sends them to SNS"
       EventPattern:
         source:
           - aws.states
@@ -296,7 +302,7 @@ Resources:
           - Step Functions Execution Status Change
         detail:
           stateMachineArn:
-            - !Ref MyStateMachine
+            - !Ref MessageProcessingStateMachine
           status:
             - SUCCEEDED
             - FAILED
