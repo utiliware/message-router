@@ -48,18 +48,18 @@ flowchart TD
         LambdaS3["Lambda"] --> S3["S3 Bucket"]
     end
 
-    style Message fill:#fce5cd,stroke:#e69138,stroke-width:2px
-    style APIGateway fill:#f6b26b,stroke:#e69138,stroke-width:2px
-    style SQS1 fill:#ffe599,stroke:#bf9000,stroke-width:2px
-    style LambdaSamuel fill:#93c47d,stroke:#38761d,stroke-width:2px
-    style EventBridge1 fill:#a4c2f4,stroke:#1155cc,stroke-width:2px
-    style LambdaHugoHiram fill:#93c47d,stroke:#38761d,stroke-width:2px
-    style SQS2 fill:#ffe599,stroke:#bf9000,stroke-width:2px
-    style StepFunctions fill:#b4a7d6,stroke:#674ea7,stroke-width:2px
-    style EventBridge2 fill:#a4c2f4,stroke:#1155cc,stroke-width:2px
-    style SNSTopic fill:#f9cb9c,stroke:#e69138,stroke-width:2px
-    style LambdaRaul fill:#93c47d,stroke:#38761d,stroke-width:2px
-    style DynamoDB fill:#6fa8dc,stroke:#0b5394,stroke-width:2px
-    style LambdaS3 fill:#93c47d,stroke:#38761d,stroke-width:2px
-    style S3 fill:#cfe2f3,stroke:#0b5394,stroke-width:2px
+    style Message fill:#e6b8af,stroke:#a61c00,stroke-width:2px,color:#000
+    style APIGateway fill:#e69138,stroke:#783f04,stroke-width:2px,color:#000
+    style SQS1 fill:#f1c232,stroke:#7f6000,stroke-width:2px,color:#000
+    style LambdaSamuel fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
+    style EventBridge1 fill:#6d9eeb,stroke:#073763,stroke-width:2px,color:#000
+    style LambdaHugoHiram fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
+    style SQS2 fill:#f1c232,stroke:#7f6000,stroke-width:2px,color:#000
+    style StepFunctions fill:#8e7cc3,stroke:#351c75,stroke-width:2px,color:#000
+    style EventBridge2 fill:#6d9eeb,stroke:#073763,stroke-width:2px,color:#000
+    style SNSTopic fill:#e69138,stroke:#783f04,stroke-width:2px,color:#000
+    style LambdaRaul fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
+    style DynamoDB fill:#3d85c6,stroke:#0b5394,stroke-width:2px,color:#fff
+    style LambdaS3 fill:#6aa84f,stroke:#274e13,stroke-width:2px,color:#000
+    style S3 fill:#3c78d8,stroke:#073763,stroke-width:2px,color:#fff
 ```
