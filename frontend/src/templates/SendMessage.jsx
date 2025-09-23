@@ -39,13 +39,13 @@ function SendMessage() {
         type: "success",
         text:
           finalCount > 1
-            ? `Se enviaron ${finalCount} mensajes exitosamente`
-            : "Mensaje enviado exitosamente",
+            ? `${finalCount} messages were sent successfully`
+            : "Message sent successfully",
       });
     } catch (err) {
       setStatus({
         type: "error",
-        text: "Error al enviar el mensaje. Intenta de nuevo.",
+        text: "Error sending the message. Please try again.",
       });
     }
   };
@@ -57,12 +57,12 @@ function SendMessage() {
         <Card variant="outlined" sx={{ p: 3 }}>
           <CardContent>
             <Typography level="h4" gutterBottom>
-              Enviar Mensaje
+              Send Message
             </Typography>
 
             {/* Input del mensaje */}
             <Input
-              placeholder="Escribe tu mensaje..."
+              placeholder="Write your message..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               sx={{ mb: 2 }}
@@ -71,7 +71,7 @@ function SendMessage() {
             {/* Input de cantidad personalizada */}
             <Input
               type="number"
-              placeholder="Cantidad de mensajes"
+              placeholder="Number of messages"
               value={count}
               onChange={(e) => setCount(e.target.value)}
               sx={{ mb: 2 }}
@@ -93,7 +93,7 @@ function SendMessage() {
 
             {/* Botón de envío */}
             <Button onClick={handleSend} disabled={!message.trim()}>
-              Enviar
+              Send
             </Button>
 
             {status && (
