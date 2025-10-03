@@ -466,6 +466,19 @@ Resources:
       Principal: sns.amazonaws.com
       SourceArn: !Ref S3EventsTopic
 
+  # --- Elasticache Cluster con Valkey para almacenar prompts de Titan ---
+    MyValkeyCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      Engine: valkey
+      CacheNodeType: cache.t3.micro
+      NumCacheNodes: 1
+      VpcSecurityGroupIds:
+        - !Ref MyCacheSecurityGroup
+      CacheSubnetGroupName: !Ref MySubnetGroup
+      SnapshotRetentionLimit: 7   # Persistencia con snapshots diarios
+      AutoMinorVersionUpgrade: true 
+
 Outputs:
   ApiUrl:
     Description: "API Gateway endpoint"
