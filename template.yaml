@@ -12,6 +12,22 @@ Globals:
     TracingEnabled: true   
 
 Resources:
+  S3ToPostgresFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/s3_to_postgres/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DevPostgres.Endpoint.Address
+          DB_PORT: "5432"
+          DB_NAME: !Ref DbName
+        # usa el secreto administrado por RDS
+          DB_SECRET_ARN: !GetAtt DevPostgres.MasterUserSecret.SecretArn
+
 
   # --- Layer with dependencies ---
   CommonDependenciesLayer:
