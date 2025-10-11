@@ -437,9 +437,16 @@ Resources:
       Runtime: python3.12
       Timeout: 30
       Tracing: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue LambdaSecurityGroupId   # si está en otro stack, o !Ref si está en el mismo
+        SubnetIds:
+          - !ImportValue PrivateSubnet1Id
+          - !ImportValue PrivateSubnet2Id
       Environment:
         Variables:
-          BEDROCK_MODEL: "anthropic.claude-v2"
+          VALKEY_HOST: !ImportValue ValkeyEndpointAddress
+          VALKEY_PORT: !ImportValue ValkeyEndpointPort
       Policies:
         - Statement:
             Effect: Allow
@@ -450,6 +457,7 @@ Resources:
             Action: bedrock:InvokeModel
             Resource: "*"
         - AWSXRayDaemonWriteAccess
+
 
   S3EventsSubscription:
     Type: AWS::SNS::Subscription
@@ -465,19 +473,6 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: sns.amazonaws.com
       SourceArn: !Ref S3EventsTopic
-
-  # --- Elasticache Cluster con Valkey para almacenar prompts de Titan ---
-    MyValkeyCluster:
-    Type: AWS::ElastiCache::CacheCluster
-    Properties:
-      Engine: valkey
-      CacheNodeType: cache.t3.micro
-      NumCacheNodes: 1
-      VpcSecurityGroupIds:
-        - !Ref MyCacheSecurityGroup
-      CacheSubnetGroupName: !Ref MySubnetGroup
-      SnapshotRetentionLimit: 7   # Persistencia con snapshots diarios
-      AutoMinorVersionUpgrade: true 
 
 Outputs:
   ApiUrl:

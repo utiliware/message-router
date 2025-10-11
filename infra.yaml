@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Infraestructura base para MessageRouter: VPC, subnets, NAT, SG, ElastiCache Valkey"
+
+Parameters:
+  PrivateSubnetId1:
+    Type: String
+    Default: ""
+  PrivateSubnetId2:
+    Type: String
+    Default: ""
+
+Resources:
+  # --- VPC ---
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MessageRouterVPC
+
+  # --- Internet Gateway ---
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MessageRouterIGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  # --- Public Subnet (para NAT) ---
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PublicSubnet
+
+  # --- Private Subnets ---
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+
+  # --- Route Tables ---
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # --- NAT Gateway (para salida de subnets privadas) ---
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: MessageRouterNAT
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # --- Security Groups ---
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Lambda SG para Valkey y salida a Internet"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 10.0.0.0/16
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: LambdaValkeySG
+
+  # --- ElastiCache Subnet Group ---
+  ValkeySubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: "Subnets privadas para Valkey"
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  # --- ElastiCache Cluster ---
+  ValkeyCluster:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupDescription: "Valkey replication group for Message Router"
+      Engine: valkey
+      EngineVersion: 7.2
+      CacheNodeType: cache.t3.micro
+      NumNodeGroups: 1
+      ReplicasPerNodeGroup: 0
+      AutomaticFailoverEnabled: false
+      TransitEncryptionEnabled: false
+      AtRestEncryptionEnabled: false
+      CacheSubnetGroupName: !Ref ValkeySubnetGroup
+      SecurityGroupIds:
+        - !Ref LambdaSecurityGroup
+      SnapshotRetentionLimit: 1
+
+Outputs:
+  VpcId:
+    Description: ID del VPC creado
+    Value: !Ref MyVPC
+    Export:
+      Name: MessageRouterVpcId
+
+  PublicSubnetId:
+    Description: Subnet pública
+    Value: !Ref PublicSubnet
+    Export:
+      Name: MessageRouterPublicSubnetId
+
+  PrivateSubnet1Id:
+    Description: Subnet privada 1
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: PrivateSubnet1Id
+
+  PrivateSubnet2Id:
+    Description: Subnet privada 2
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: PrivateSubnet2Id
+
+  LambdaSecurityGroupId:
+    Description: Security Group para Lambdas
+    Value: !Ref LambdaSecurityGroup
+    Export:
+      Name: LambdaSecurityGroupId
+
+  ValkeyEndpointAddress:
+    Description: Endpoint de Valkey
+    Value: !GetAtt ValkeyCluster.PrimaryEndPoint.Address
+    Export:
+      Name: ValkeyEndpointAddress
+
+  ValkeyEndpointPort:
+    Description: Puerto de Valkey
+    Value: !GetAtt ValkeyCluster.PrimaryEndPoint.Port
+    Export:
+      Name: ValkeyEndpointPort

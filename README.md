@@ -1,3 +1,24 @@
+# Construcción de MessageRouter con Elasticache y Bedrock con modelo Titan Text.
+
+## [IMPORTANTE] Antes de construir con SAM Template
+
+### Nuevo contentido agregado:
+
+- Se creó un nuevo template de SAM que permitirá generar el stack con la configuración de VPC, rutas y subredes (***infra.yml***).
+
+- Asegúrate de ejecutar el siguiente comando en la carpeta donde se ubica ***infra.yaml***. 
+```
+sam deploy --template-file infra.yaml --stack-name MessageRouterInfra
+```
+- Ahora, utilizando ***template.yaml***, realizarás build y deploy:
+```
+sam build
+```
+```
+sam deploy
+```
+# Esquema de Message Router
+
 ``` mermaid
 flowchart TD
     Message([Message]) --> Angel
