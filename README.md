@@ -17,6 +17,9 @@ sam build
 ```
 sam deploy
 ```
+
+## [IMPORTANTE] Elasticache cobra por tiempo en que estés almacenando en cache.
+
 # Esquema de Message Router
 
 ``` mermaid

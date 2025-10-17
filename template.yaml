@@ -52,6 +52,155 @@ Resources:
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
 
+  # --- API Websocket para desplegar prompts en frontend ---
+  
+  MessageWebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: MessageWebSocketApi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  # Lambda para $connect (guardar conexión)
+  WebSocketConnectLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/websocket/connect
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+  # Lambda para $disconnect (eliminar conexión)
+  WebSocketDisconnectLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/websocket/disconnect
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+
+    # --- Integración WebSocket $connect ---
+  WebSocketConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectLambda.Arn}/invocations"
+      IntegrationMethod: POST
+
+  # --- Integración WebSocket $disconnect ---
+  WebSocketDisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectLambda.Arn}/invocations"
+
+  # --- Rutas ---
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      RouteKey: $connect
+      Target: !Sub "integrations/${WebSocketConnectIntegration.IntegrationId}"
+
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      RouteKey: $disconnect
+      Target: !Sub "integrations/${WebSocketDisconnectIntegration.IntegrationId}"
+
+
+  PermissionForApiToInvokeConnectLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketConnectLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$connect"
+
+  PermissionForApiToInvokeDisconnectLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketDisconnectLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$disconnect"
+
+
+    # Lambda para $default (manejo de mensajes entrantes)
+  WebSocketDefaultLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/websocket/default
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+  # Integración WebSocket $default
+  WebSocketDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDefaultLambda.Arn}/invocations"
+
+  # Ruta $default
+  WebSocketDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      RouteKey: $default
+      Target: !Sub "integrations/${WebSocketDefaultIntegration.IntegrationId}"
+
+  # Permiso para que API Gateway invoque la Lambda $default
+  PermissionForApiToInvokeDefaultLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketDefaultLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$default"
+
+  MessageWebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - WebSocketConnectRoute
+      - WebSocketDisconnectRoute
+      - WebSocketDefaultRoute 
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+  
+      # --- Stage (Prod) ---
+  MessageWebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: Prod
+      DeploymentId: !Ref MessageWebSocketDeployment
+      ApiId: !Ref MessageWebSocketApi
+      AutoDeploy: true
+
+
   # --- SQS Queue (API -> SQS1) ---
   MessageQueue:
     Type: AWS::SQS::Queue
@@ -355,7 +504,7 @@ Resources:
             TableName: !Ref MessagesTable
         - AWSXRayDaemonWriteAccess
 
-  # --- DynamoDB ---
+  # --- DynamoDB Tables [MessagesTable and Connections Table]---
   MessagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -369,6 +518,18 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ConnectionsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
 
   # --- Lambda DDB to S3 ---
   DdbToS3Function:
@@ -428,7 +589,7 @@ Resources:
             Topic: !Ref S3EventsTopic
 
 
-  # --- Lambda que consume desde SNS y envía a Bedrock ---
+  # --- Lambda que consume desde SNS y envía a Bedrock -> Websocket ---
   S3ToBedrockFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -439,7 +600,7 @@ Resources:
       Tracing: Active
       VpcConfig:
         SecurityGroupIds:
-          - !ImportValue LambdaSecurityGroupId   # si está en otro stack, o !Ref si está en el mismo
+          - !ImportValue LambdaSecurityGroupId
         SubnetIds:
           - !ImportValue PrivateSubnet1Id
           - !ImportValue PrivateSubnet2Id
@@ -447,15 +608,31 @@ Resources:
         Variables:
           VALKEY_HOST: !ImportValue ValkeyEndpointAddress
           VALKEY_PORT: !ImportValue ValkeyEndpointPort
+          WEBSOCKET_ENDPOINT: !Sub "https://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
       Policies:
+        # Permisos a S3 y DynamoDB
         - Statement:
             Effect: Allow
-            Action: s3:GetObject
-            Resource: !Sub "${TargetBucket.Arn}/*"
+            Action:
+              - s3:GetObject
+              - dynamodb:Scan
+              - dynamodb:DeleteItem
+            Resource:
+              - !Sub "${TargetBucket.Arn}/*"
+              - !GetAtt ConnectionsTable.Arn
+        # Permiso para llamar a Bedrock
         - Statement:
             Effect: Allow
             Action: bedrock:InvokeModel
             Resource: "*"
+        # Permiso para enviar mensajes vía WebSocket
+        - Statement:
+            Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/Prod/POST/@connections/*"
+        # Permiso X-Ray
         - AWSXRayDaemonWriteAccess
 
 
@@ -478,6 +655,9 @@ Outputs:
   ApiUrl:
     Description: "API Gateway endpoint"
     Value: !Sub "https://${MessageApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/send"
+  WebSocketApiUrl:
+    Description: "WebSocket API URL"
+    Value: !Sub "wss://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   SNSTopicArn:
     Description: "SNS Topic ARN"
     Value: !Ref MySNSTopic
