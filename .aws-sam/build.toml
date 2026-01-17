@@ -63,4 +63,13 @@ manifest_hash = ""
 packagetype = "Zip"
 functions = ["MetricsFunction"]
 
+[function_build_definitions.0702b6f4-f1ff-4e25-83dd-2c093d0c15a4]
+codeuri = "/mnt/data/Documents/aws_certification/work/aws_meetup/message-router/backend/src/handlers/index_to_opensearch"
+runtime = "python3.12"
+architecture = "x86_64"
+handler = "app.lambda_handler"
+manifest_hash = "d6eeb06a9d85fef483c7ae49cdef9dc7"
+packagetype = "Zip"
+functions = ["IndexToOpenSearchFunction"]
+
 [layer_build_definitions]

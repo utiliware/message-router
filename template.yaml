@@ -408,9 +408,279 @@ Resources:
             BucketName: !Ref TargetBucket
         - AWSXRayDaemonWriteAccess
   
-  # --- S3 Bucket ---
+  
+  # --- S3 Bucket (con EventBridge enabled) ---
   TargetBucket:
     Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+
+
+
+
+  # --- EventBridge ---
+  S3ToOpenSearchRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-S3ToOpenSearchRule"
+      Description: "Arranca OpenSearchIndexingStateMachine cuando S3 recibe objetos en TargetBucket"
+      EventPattern:
+        source:
+          - "aws.s3"
+        detail-type:
+          - "Object Created"
+        detail:
+          bucket:
+            name:
+              - !Ref TargetBucket
+      Targets:
+        - Arn: !Ref OpenSearchIndexingStateMachine
+          Id: "StartOpenSearchSFNFromS3"
+          RoleArn: !GetAtt EventBridgeStartOpenSearchSfnRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              bucket: "$.detail.bucket.name"
+              key: "$.detail.object.key"
+            InputTemplate: '{"bucket": <bucket>, "key": <key>}'
+
+  # Role para que EventBridge pueda arrancar la Step Function
+  EventBridgeStartOpenSearchSfnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AllowStartExecutionOnOpenSearchSFN
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Ref OpenSearchIndexingStateMachine
+
+
+
+  # --- StepFunction ---
+  OpenSearchIndexingStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${AWS::StackName}-OpenSearchIndexingStateMachine"
+      RoleArn: !GetAtt OpenSearchIndexingStateMachineRole.Arn
+      TracingConfiguration:
+        Enabled: true
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
+
+      DefinitionString: !Sub |
+        {
+          "Comment": "StateMachine para indexar objetos S3 en OpenSearch",
+          "StartAt": "IndexS3Object",
+          "States": {
+            "IndexS3Object": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${IndexToOpenSearchFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+
+
+  # Role de ejecución del Step Function
+  # LogGroup para la State Machine (solo CloudWatch Logs)
+  OpenSearchIndexingStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine"
+      RetentionInDays: 14
+
+
+  # Role de ejecución para la State Machine (separado; nombre opcional)
+  OpenSearchIndexingStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: OpenSearchIndexingSFN-Logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Permisos amplios necesarios por Step Functions para manejar destinos/entregas de logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                  - logs:PutDestination
+                  - logs:PutDestinationPolicy
+                  - logs:AssociateKmsKey
+                Resource: "*"        # estas operaciones a menudo requieren "*" en el recurso
+              # Permisos concretos para escribir en el LogGroup y sus streams
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine:*"
+
+        - PolicyName: OpenSearchIndexingSFN-InvokeLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt IndexToOpenSearchFunction.Arn
+
+
+
+
+  # --- Lambda Opensearch ---
+  IndexToOpenSearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/index_to_opensearch/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref TargetBucket
+          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+          OPENSEARCH_INDEX: messages
+          OPENSEARCH_MASTER_SECRET_ARN: !Ref OpenSearchMasterUserSecret
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref TargetBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - es:ESHttpPost
+                - es:ESHttpPut
+                - es:ESHttpPatch
+                - es:ESHttpGet
+              Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref OpenSearchMasterUserSecret
+        - AWSXRayDaemonWriteAccess
+
+
+
+
+  # --- OpenSearch ---
+  # Secret para la contraseña del master user (Secrets Manager generará la password)
+  OpenSearchMasterUserSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}-OpenSearchMasterUser"
+      Description: "Master user credentials for OpenSearch Dashboards"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"master-user"}'
+        GenerateStringKey: "password"
+        # permite puntuación para cumplir la política de OpenSearch
+        ExcludePunctuation: false
+        # opcional: excluye caracteres que complican referencias/URLs
+        ExcludeCharacters: '"@\/\\`'
+        PasswordLength: 20
+
+
+  # Dominio OpenSearch con Fine-Grained Access Control (internal user DB)
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: "msg-domain"                # opcional; si lo quitas CF genera uno
+      EngineVersion: OpenSearch_2.11
+      ClusterConfig:
+        InstanceType: t3.small.search
+        InstanceCount: 1
+      EBSOptions:
+        EBSEnabled: true
+        VolumeSize: 10
+      # Obligatorio si activas AdvancedSecurityOptions:
+      EncryptionAtRestOptions:
+        Enabled: true
+      NodeToNodeEncryptionOptions:
+        Enabled: true
+      DomainEndpointOptions:
+        EnforceHTTPS: true
+        # opcional: TLSSecurityPolicy: "Policy-Min-TLS-1-2-2019-07"
+      AdvancedSecurityOptions:
+        Enabled: true
+        InternalUserDatabaseEnabled: true
+        MasterUserOptions:
+          MasterUserName: "master-user"
+          # La contraseña se toma desde Secrets Manager (referencia dinámica)
+          MasterUserPassword: !Sub '{{resolve:secretsmanager:${OpenSearchMasterUserSecret}:SecretString:password}}'
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          # Permitir a la cuenta administrar el dominio (opcional)
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "es:*"
+            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+
+          # Permitir peticiones HTTP (GET/POST/PUT/DELETE) desde el navegador
+          - Effect: Allow
+            Principal: "*"                     # permite peticiones no firmadas
+            Action:
+              - es:ESHttpGet
+              - es:ESHttpPost
+              - es:ESHttpPut
+              - es:ESHttpDelete
+              - es:ESHttpHead
+            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+
+
+
+
 
   # --- API Gateway para métricas ---
   MetricsApi:
