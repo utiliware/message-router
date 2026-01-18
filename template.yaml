@@ -426,6 +426,8 @@ Resources:
         TopicConfigurations:
           - Event: "s3:ObjectCreated:*"
             Topic: !Ref S3EventsTopic
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
 
 
   # --- Lambda que consume desde SNS y envía a Bedrock ---
@@ -457,6 +459,201 @@ Resources:
             Action: bedrock:InvokeModel
             Resource: "*"
         - AWSXRayDaemonWriteAccess
+
+  # ------------------- OpenSearch ---------------------------
+  OpenSearchMasterUserSecret:
+  Type: AWS::SecretsManager::Secret
+  Properties:
+    Name: !Sub "${AWS::StackName}-OpenSearchMasterUser"
+    Description: "Master user credentials for OpenSearch"
+    GenerateSecretString:
+      SecretStringTemplate: '{"username":"master-user"}'
+      GenerateStringKey: "password"
+      ExcludePunctuation: false
+      ExcludeCharacters: '"@\/\\`'
+      PasswordLength: 20
+
+  OpenSearchDomain:
+  Type: AWS::OpenSearchService::Domain
+  Properties:
+    DomainName: "msg-domain"
+    EngineVersion: OpenSearch_2.11
+    ClusterConfig:
+      InstanceType: t3.small.search
+      InstanceCount: 1
+    EBSOptions:
+      EBSEnabled: true
+      VolumeSize: 10
+    EncryptionAtRestOptions:
+      Enabled: true
+    NodeToNodeEncryptionOptions:
+      Enabled: true
+    DomainEndpointOptions:
+      EnforceHTTPS: true
+    AdvancedSecurityOptions:
+      Enabled: true
+      InternalUserDatabaseEnabled: true
+      MasterUserOptions:
+        MasterUserName: "master-user"
+        MasterUserPassword: !Sub '{{resolve:secretsmanager:${OpenSearchMasterUserSecret}:SecretString:password}}'
+    AccessPolicies:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action: "es:*"
+          Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+
+  IndexToOpenSearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/index_to_opensearch/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref TargetBucket
+          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+          OPENSEARCH_INDEX: messages
+          OPENSEARCH_MASTER_SECRET_ARN: !Ref OpenSearchMasterUserSecret
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref TargetBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - es:ESHttpPost
+              - es:ESHttpPut
+              - es:ESHttpPatch
+              - es:ESHttpGet
+            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Ref OpenSearchMasterUserSecret
+        - AWSXRayDaemonWriteAccess
+
+  OpenSearchIndexingStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine"
+      RetentionInDays: 14
+
+  OpenSearchIndexingStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: OpenSearchSFNLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                Resource: "*"
+        - PolicyName: InvokeIndexLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt IndexToOpenSearchFunction.Arn
+
+  OpenSearchIndexingStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt OpenSearchIndexingStateMachineRole.Arn
+      TracingConfiguration:
+        Enabled: true
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "IndexS3Object",
+          "States": {
+            "IndexS3Object": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${IndexToOpenSearchFunction.Arn}",
+                "Payload.$": "$"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+
+  EventBridgeStartOpenSearchSfnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowStartExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref OpenSearchIndexingStateMachine
+
+  S3ToOpenSearchRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-S3ToOpenSearchRule"
+      EventPattern:
+        source:
+          - "aws.s3"
+        detail-type:
+          - "Object Created"
+        detail:
+          bucket:
+            name:
+              - !Ref TargetBucket
+      Targets:
+        - Arn: !Ref OpenSearchIndexingStateMachine
+          Id: "StartOpenSearchSFN"
+          RoleArn: !GetAtt EventBridgeStartOpenSearchSfnRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              bucket: "$.detail.bucket.name"
+              key: "$.detail.object.key"
+            InputTemplate: '{"bucket": <bucket>, "key": <key>}'
 
 
   S3EventsSubscription:
