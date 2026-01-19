@@ -53,7 +53,7 @@ def lambda_handler(event, context):
 
     # --- Llamar a Bedrock ---
     bedrock_response = bedrock_client.invoke_model(
-        modelId="amazon.titan-text-express-v1",
+        modelId="amazon.nova-2-lite-v1:0",
         body=json.dumps({"inputText": prompt}),
         contentType="application/json"
     )
