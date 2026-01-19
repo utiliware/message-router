@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Section from "../../../components/Section";
+import Section from "../../../components/section";
 import Chart from "./chart1";
 import { useMetrics } from "../../../hooks/useMetrics";
 

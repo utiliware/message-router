@@ -1,4 +1,4 @@
-import Section from "../../../components/Section";
+import Section from "../../../components/section";
 import Message from "./message";
 import { Box } from "@mui/joy";
 

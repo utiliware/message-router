@@ -1,5 +1,5 @@
 import { Box, Stack } from "@mui/joy";
-import Section from "../../../components/Section";
+import Section from "../../../components/section";
 import ResultsImage from "./ai-generated";
 import ResultsMessage from "./payload";
 

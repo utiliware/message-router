@@ -1,6 +1,6 @@
 import { Box, Typography } from "@mui/joy";
 
-import Section from "../../components/Section";
+import Section from "../../components/section";
 
 export default function Title() {
     return (
