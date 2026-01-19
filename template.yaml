@@ -510,7 +510,28 @@ Resources:
 
 
 
-  # ------------------------------------| Bedrock Tesxt Agent |------------------------------------
+  # ------------------------------------| Bedrock Text Agent |------------------------------------
+
+  # ---------|| SNS Subscription from S3 to Lambda ||---------
+  S3EventsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref S3EventsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt S3ToBedrockFunction.Arn
+
+
+
+  # ---------|| Permission for SNS to invoke Lambda ||---------
+  PermissionForSNSToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3ToBedrockFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref S3EventsTopic
+
+
 
   # ---------|| Lambda to send S3 objects to Bedrock Text Agent ||---------
   S3ToBedrockFunction:
@@ -543,24 +564,75 @@ Resources:
         - AWSXRayDaemonWriteAccess
 
 
-  # ---------|| SNS Subscription from S3 to Lambda ||---------
-  S3EventsSubscription:
-    Type: AWS::SNS::Subscription
+
+
+
+  # ------------------------------------| Bedrock Image Generation |------------------------------------
+
+  # ---------|| S3 Bucket for generated images ||---------
+  GeneratedImagesBucket:
+    Type: AWS::S3::Bucket
     Properties:
-      TopicArn: !Ref S3EventsTopic
-      Protocol: lambda
-      Endpoint: !GetAtt S3ToBedrockFunction.Arn
+      BucketName: !Sub "${AWS::StackName}-generated-images"
 
 
 
-  # ---------|| Permission for SNS to invoke Lambda ||---------
-  PermissionForSNSToInvokeLambda:
+  # ---------|| Lambda to send S3 objects to Bedrock (Image generation) ||---------
+  S3ToBedrockImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-S3ToBedrockImageHandler'
+      CodeUri: backend/src/handlers/lambda_s3_to_bedrock_image/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 120
+      Tracing: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue LambdaSecurityGroupId
+        SubnetIds:
+          - !ImportValue PrivateSubnet1Id
+          - !ImportValue PrivateSubnet2Id
+      Environment:
+        Variables:
+          MODEL_ID: "amazon.nova-canvas-v1:0"
+          OUTPUT_BUCKET: !Ref GeneratedImagesBucket
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "${TargetBucket.Arn}/*"
+        - S3WritePolicy:
+            BucketName: !Ref GeneratedImagesBucket 
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource: "*"
+        - AWSXRayDaemonWriteAccess
+
+
+
+  # ---------|| Permission for SNS to invoke Image Lambda ||---------
+  PermissionForSNSToInvokeImageLambda:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref S3ToBedrockFunction
+      FunctionName: !Ref S3ToBedrockImageFunction
       Action: lambda:InvokeFunction
       Principal: sns.amazonaws.com
       SourceArn: !Ref S3EventsTopic
+
+
+
+  # ---------|| SNS Subscription from S3 to Bedrock Image Lambda ||---------
+  S3ImageEventsSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: PermissionForSNSToInvokeImageLambda
+    Properties:
+      TopicArn: !Ref S3EventsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt S3ToBedrockImageFunction.Arn
 
 
 
