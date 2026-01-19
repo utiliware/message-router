@@ -8,7 +8,6 @@ patch_all()
 # Cliente SQS
 sqs = boto3.client("sqs")
 QUEUE_URL = os.environ.get("QUEUE_URL")
-def respionse
 
 def lambda_handler(event, context):
     # Headers CORS comunes
