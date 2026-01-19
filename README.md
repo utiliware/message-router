@@ -1,3 +1,24 @@
+# Message Router.
+
+## [IMPORTANT] Before building message router.
+
+### New added content:
+
+- A new SAM template was added that will create a new stack with the VPC, routes and subnets configuration (***infra.yml***).
+
+- Make sure to run the following command in the folder where ***infra.yaml*** is located.
+
+```
+sam deploy --template-file infra.yaml --stack-name MessageRouterInfra
+```
+- Now you will build and deploy ***template.yaml***:
+```
+sam build
+```
+```
+sam deploy
+```
+# Message Router Architecture.
 
 ``` mermaid
 flowchart TD

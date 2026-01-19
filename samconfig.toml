@@ -1,4 +1,3 @@
-
 # More information about the configuration file can be found here:
 # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-config.html
 version = 0.1
@@ -17,6 +16,10 @@ lint = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+s3_prefix = "message-router"
+region = "us-east-1"
+parameter_overrides = "MessageQueueName=\"MyMessageQueue\" QueueTwoName=\"message-router-queue-2\" QueueTwoDLQName=\"message-router-queue-2-dlq\" SNSTopicName=\"MyTargetTopic\" MessagesTableName=\"MessagesTable\" S3BucketName=\"target-bucket\" VpcId=\"vpc-07018b54f6e662f06\" PrivateSubnet1Id=\"subnet-0892069ea389a4331\" PrivateSubnet2Id=\"subnet-03342f6d1aa42105e\" LambdaSecurityGroupId=\"sg-08bda53e094082678\" ValkeyEndpointAddress=\"mev9zpxiv7jvhc3.dqg9ku.ng.0001.use1.cache.amazonaws.com\" ValkeyEndpointPort=\"6379\""
+image_repositories = []
 
 [default.package.parameters]
 resolve_s3 = true
