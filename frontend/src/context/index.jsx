@@ -4,7 +4,7 @@ const IdxContext = createContext();
 
 export const IdxProvider = ({ children }) => {
   const [idx, setIdx] = useState(1); 
-  const [messageIA, setMessageIA] = useState("")
+  const [messageIA, setMessageIA] = useState(null)
 
   return (
     <IdxContext.Provider value={{ idx, setIdx, messageIA, setMessageIA }}>

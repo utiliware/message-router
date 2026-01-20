@@ -6,13 +6,10 @@ export default function ResultsMessage() {
   const { messResult, loading } = useResults();
 
   useEffect(() => {
-    console.log(messResult)
-  },[messResult])
+    console.log(messResult);
+  }, [messResult]);
 
-
-  const messages = messResult || null; 
-
-  if (loading && !messages) {
+  if (loading) {
     return (
       <Box
         sx={{
@@ -32,7 +29,7 @@ export default function ResultsMessage() {
     );
   }
 
-  if (!messages) {
+  if (!messResult) {
     return (
       <Box
         sx={{
@@ -71,11 +68,11 @@ export default function ResultsMessage() {
           bgcolor: "background.surface",
         }}
       >
-        <Box sx={{ fontWeight: "bold", mb: 1 }}>{messages.message}</Box>
+        <Box sx={{ fontWeight: "bold", mb: 1 }}>{messResult.message}</Box>
 
-        {(messages.contact || []).map((c) => (
+        {(messResult.contact || []).map((c, index) => (
           <Box
-            key={c.id}
+            key={c.id || index}
             sx={{
               mb: 1,
               p: 1,

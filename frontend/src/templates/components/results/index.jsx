@@ -22,7 +22,7 @@ export default function Results() {
                             alignItems: "center",
                         }}
                     >
-                        <ResultsMessage/>
+                        {/* <ResultsMessage/> */}
                         <ResultsImage/>
                     </Stack>
                     </Box>

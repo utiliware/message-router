@@ -1,6 +1,6 @@
-import { Container,Divider, Input, Select, Option, Box, Stack, Button  } from "@mui/joy";
-import { Grid, styled } from '@mui/joy'
-import { useState, useContext } from "react";
+import { Container, Divider, Input, Select, Option, Box, Stack, Button } from "@mui/joy";
+import { Grid, styled } from '@mui/joy';
+import { useState } from "react";
 import { useApi } from "../../../../endpoint/api-base";
 import { useIdx } from "../../../../context";
 
@@ -16,9 +16,10 @@ const Item = styled(Box)(({ theme }) => ({
 }));
 
 export default function Message() {
-    const { setIdx, setMessageIA } = useIdx()
-    const { sendConfirmationAndMessage } = useApi()
-    const [contact, setContact] = useState("email")
+    const [counter, setCounter] = useState(1)
+    const { setIdx, setMessageIA } = useIdx();
+    const { sendConfirmationAndMessage } = useApi();
+    const [contact, setContact] = useState("email");
     const [form, setForm] = useState({
         lada: "",
         number: "",
@@ -26,20 +27,20 @@ export default function Message() {
         domain: "@gmail.com",
         message: "",
     });
-    const [contactStorage, setContactStorage] = useState([])
-    const [ids, setIds] = useState(1)
-    const [messageTo, setMessageTo] = useState("")
-
+    const [contactStorage, setContactStorage] = useState([]);
+    const [ids, setIds] = useState(1);
+    const [messageTo, setMessageTo] = useState("");
+    
     const hasData = contactStorage.length > 0 && Object.keys(contactStorage[0]).length > 0;
 
-    const handleIdx = (e) => {
-        setIds(e.target.value)
-        setIdx(e.target.value)
-    }
+    // const handleIdx = (e) => {
+    //     setIds(e.target.value);
+    // };
+
     const handleMessage = (e) => {
-        setMessageTo(e.target.value)
-        setMessageIA(e.target.value)
-    }
+        setMessageTo(e.target.value);
+    };
+
     const handleContact = (e, value) => setContact(value);
     const handleDomain = (e, value) => setForm((prev) => ({ ...prev, domain: value }));
 
@@ -55,48 +56,30 @@ export default function Message() {
         }));
     };
 
-
     const isValid = () => {
-        // if (contact === "phone" && (!form.lada || !form.number)) {
-        //     return false;
-        // }
         if (contact === "email" && (!form.email || !form.domain)) {
             return false;
         }
         return true;
     };
 
-    const handleAdd = () => {
-        if (!isValid()) return;
+    const handleAdd = async () => {
+        if (!isValid() || !ids) return;
+
         const contactArray = [];
 
-        // if (contact === "phone") {
-        //     contactArray.push({
-        //     id: Date.now(), // Es temporal
-        //     type: 'phone',
-        //     lada: form.lada,
-        //     number: form.number,
-        //     });
-        // }
-
         if (contact === "email") {
-            // contactArray.push({
-            //     id: Date.now(), // Es temporal
-            //     type: 'email',
-            //     email: form.email,
-            //     domains: form.domain,
-            // });
-
             try {
-                const sendConfirmationResp = sendConfirmationAndMessage(
-                {
+                const sendConfirmationResp = await sendConfirmationAndMessage({
                     id: ids, 
                     method: 'valid',
                     type: 'email',
                     email: form.email,
                     domains: form.domain,
-                })
-                console.log(sendConfirmationResp)
+                });
+                
+                console.log(sendConfirmationResp);
+                
                 contactArray.push({
                     id: ids, 
                     type: 'email',
@@ -104,9 +87,9 @@ export default function Message() {
                     domains: form.domain,
                 });
             } catch (error) {
-                console.log(sendConfirmationResp)
+                console.log(error);
+                return;
             }
-
         }
 
         const newItem = {
@@ -127,30 +110,37 @@ export default function Message() {
     };
 
     const handleDelete = (id) => {
-        setContactStorage((prev) =>
-            prev.filter((item) => item.id !== id)
-        );
+        setContactStorage((prev) => prev.filter((item) => item.id !== id));
     };
 
     const sendMessage = async () => {
+        if (!contactStorage.length || !ids) return;
         const payload = {
-            "method": `${contactStorage[0].method}`,
-            "id": `${contactStorage[0].id}`,
-            "message": `${contactStorage[0].message}`
+            "method": "send",
+            "id": ids,
+            "message": messageTo
+        };        
+        try {
+            const sendMessageResp = await sendConfirmationAndMessage(payload);
+            console.log(sendMessageResp);
+            setIdx(1+counter);
+            setCounter(1+counter)
+        } catch (error) {
+            console.log(error);
         }
-        console.log(payload)
-        const sendMessage = sendConfirmationAndMessage(payload)
-        console.log(sendMessage)
-    }
+        setMessageIA(messageTo);
+        setContactStorage([])
+    };
+
     return (
         <Container>
             <Box>
-                  <Input
+                {/* <Input
                     placeholder="Write id..."
                     value={ids}
                     onChange={handleIdx}
                     sx={{ width: "20%", mb: 2 }}
-                />
+                /> */}
                 <Input
                     placeholder="Write your message..."
                     value={messageTo}
@@ -170,112 +160,106 @@ export default function Message() {
                         sx={{ width: "20%" }}
                         onChange={handleContact}
                     >
-                        {/* <Option value="phone">Phone</Option> */}
                         <Option value="email">Emails</Option>
                     </Select>
                     {contact === "phone" ? (
-                    <>
-                        <Input
-                            placeholder="+123"
-                            value={form.lada}
-                            onChange={handleFormChange("lada")}
-                            sx={{ width: "15%" }}
-                        />
-                        <Input
-                            placeholder="Phone number"
-                            value={form.number}
-                            onChange={handleFormChange("number")}
-                            sx={{ width: "65%" }}
-                        />
-                    </>
+                        <>
+                            <Input
+                                placeholder="+123"
+                                value={form.lada}
+                                onChange={handleFormChange("lada")}
+                                sx={{ width: "15%" }}
+                            />
+                            <Input
+                                placeholder="Phone number"
+                                value={form.number}
+                                onChange={handleFormChange("number")}
+                                sx={{ width: "65%" }}
+                            />
+                        </>
                     ) : (
-                    <>
-                        <Input
-                            placeholder="Email"
-                            value={form.email}
-                            onChange={handleFormChange("email")}
-                            sx={{ width: "50%" }}
-                        />
-                        <Select
-                            value={form.domain}
-                            sx={{ width: "30%" }}
-                            onChange={handleDomain}
-                        >
-                            <Option value="@gmail.com">@gmail.com</Option>
-                            <Option value="@hotmail.com">@hotmail.com</Option>
-                            <Option value="@outlook.com">@outlook.com</Option>
-                        </Select>
-                    </>
+                        <>
+                            <Input
+                                placeholder="Email"
+                                value={form.email}
+                                onChange={handleFormChange("email")}
+                                sx={{ width: "50%" }}
+                            />
+                            <Select
+                                value={form.domain}
+                                sx={{ width: "30%" }}
+                                onChange={handleDomain}
+                            >
+                                <Option value="@gmail.com">@gmail.com</Option>
+                                <Option value="@hotmail.com">@hotmail.com</Option>
+                                <Option value="@outlook.com">@outlook.com</Option>
+                            </Select>
+                        </>
                     )}
-                    <Button 
-                        sx={{
-                            
-                        }}
-                        onClick={handleAdd}
-                    >
+                    <Button onClick={handleAdd}>
                         +
                     </Button>
                 </Stack>
                 <Divider sx={{ my: 2 }} />
                 {hasData && (
                     <Grid
-                    container
-                    spacing={2}
-                    sx={{
-                        mt: 2,
-                        maxHeight: 200,
-                        overflowY: "auto",
-                        overflowX: "hidden",
-                    }}
+                        container
+                        spacing={2}
+                        sx={{
+                            mt: 2,
+                            maxHeight: 200,
+                            overflowY: "auto",
+                            overflowX: "hidden",
+                        }}
                     >
-                    {contactStorage.map((item, index) => (
-                        <Grid
-                            container
-                            spacing={2}
-                            key={item.id ?? index}
-                            sx={{ mb: 1, width: "100%", p: 1, alignItems: "center" }}
-                        >
-                        <Grid xs={2}>
-                            <Item sx={{  
-                                    boxShadow: 1,
-                                    outline: "1px solid rgba(0,0,0,0.2)", 
-                                    height: 40 
-                                }}>
-                            {item.contact.map((c) => c.type).join(", ")}
-                            </Item>
-                        </Grid>
-
-                        <Grid xs={8.5}>
-                            <Grid container sx={{ flexWrap: "nowrap", alignItems: "stretch", gap: 1 }}>
-                            {item.contact.map((contactItem, i) => (
-                                <Grid key={contactItem.id ?? i} sx={{ flexGrow: 1 }}>
-                                <Item
-                                    sx={{
-                                    height: 40,
-                                    boxShadow: 1,
-                                    outline: "1px solid rgba(0,0,0,0.2)", 
-                                    fontSize: "0.85rem",
-                                    whiteSpace: "nowrap",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    }}
-                                >
-                                    {contactItem.lada
-                                    ? `${contactItem.lada} ${contactItem.number}`
-                                    : `${contactItem.email}${contactItem.domains}`}
-                                </Item>
+                        {contactStorage.map((item, index) => (
+                            <Grid
+                                container
+                                spacing={2}
+                                key={item.id ?? index}
+                                sx={{ mb: 1, width: "100%", p: 1, alignItems: "center" }}
+                            >
+                                <Grid xs={2}>
+                                    <Item sx={{  
+                                        boxShadow: 1,
+                                        outline: "1px solid rgba(0,0,0,0.2)", 
+                                        height: 40 
+                                    }}>
+                                        {item.contact.map((c) => c.type).join(", ")}
+                                    </Item>
                                 </Grid>
-                            ))}
-                            </Grid>
-                        </Grid>
 
-                        <Grid xs={1}>
-                            <Button color="danger" onClick={() => handleDelete(item.id)}>
-                            Del
-                            </Button>
-                        </Grid>
-                        </Grid>
-                    ))}
+                                <Grid xs={8.5}>
+                                    <Grid container sx={{ flexWrap: "nowrap", alignItems: "stretch", gap: 1 }}>
+                                        {item.contact.map((contactItem, i) => (
+                                            <Grid key={contactItem.id ?? i} sx={{ flexGrow: 1 }}>
+                                                <Item
+                                                    sx={{
+                                                        height: 40,
+                                                        boxShadow: 1,
+                                                        outline: "1px solid rgba(0,0,0,0.2)", 
+                                                        fontSize: "0.85rem",
+                                                        whiteSpace: "nowrap",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                    }}
+                                                >
+                                                    {contactItem.lada
+                                                        ? `${contactItem.lada} ${contactItem.number}`
+                                                        : `${contactItem.email}${contactItem.domains}`}
+                                                </Item>
+                                            </Grid>
+                                        ))}
+                                    </Grid>
+                                </Grid>
+
+                                <Grid xs={1}>
+                                    <Button color="danger" onClick={() => handleDelete(item.id)}>
+                                        Del
+                                    </Button>
+                                </Grid>
+                            </Grid>
+                        ))}
                     </Grid>
                 )}
                 <Button
@@ -290,11 +274,11 @@ export default function Message() {
                         }
                     }}
                     onClick={sendMessage}
-                    >
-
+                >
                     Send
                 </Button>
             </Box>
         </Container>
-    )
+    );
 }
+
