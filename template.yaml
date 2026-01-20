@@ -787,30 +787,36 @@ Resources:
       Runtime: python3.12
       Timeout: 30
       Tracing: Active
+
       VpcConfig:
         SecurityGroupIds:
           - !ImportValue LambdaSecurityGroupId
         SubnetIds:
           - !ImportValue PrivateSubnet1Id
           - !ImportValue PrivateSubnet2Id
+
       Environment:
         Variables:
           VALKEY_HOST: !ImportValue ValkeyEndpointAddress
           VALKEY_PORT: !ImportValue ValkeyEndpointPort
+
       Policies:
+        # --- Leer objetos de S3 ---
         - Statement:
             Effect: Allow
-            Action: s3:GetObject
+            Action:
+              - s3:GetObject
             Resource: !Sub "${TargetBucket.Arn}/*"
+
+        # --- Permiso para Amazon Nova (Converse API) ---
         - Statement:
             Effect: Allow
-            Action: bedrock:InvokeModel
+            Action:
+              - bedrock:Converse
             Resource: "*"
+
+        # --- X-Ray ---
         - AWSXRayDaemonWriteAccess
-
-
-
-
 
   # ------------------------------------| Bedrock Image Generation |------------------------------------
 
