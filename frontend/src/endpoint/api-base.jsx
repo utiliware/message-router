@@ -1,6 +1,6 @@
 import axios from "axios";
 
-// Base de tu API
+// CHANGE URL
 const API_URL = 'https://lglt388ca5.execute-api.us-east-1.amazonaws.com/dev';
 
 const headers = (id = null) => {
