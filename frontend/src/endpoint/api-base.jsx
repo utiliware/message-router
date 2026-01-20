@@ -1,44 +1,56 @@
 import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_BASE;
+// Base de tu API
+const API_URL = 'https://lglt388ca5.execute-api.us-east-1.amazonaws.com/dev';
 
-const headers = () => ({
-  headers: {
-    "Content-Type": "application/json",
-  },
-});
+const headers = (id = null) => {
+  if (id != null) {
+    return {
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "ids": `${id}` 
+      }
+    } 
+  } else {
+    return {
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      }
+    }
+  }
+};
 
 export const useApi = () => {
 
   const getMetrics = async () => {
-    const url = `${API_URL}/grafico`
-    return axios.get(url, headers)
+    const url = `${API_URL}/grafico`;
+    return axios.get(url, headers());
   }
 
   const getResultsMessage = async (id) => {
-    const url = `${API_URL}/json/${id}`
-    return axios.get(url, headers)
+    const url = `${API_URL}/sms/confirmed`;
+    return axios.get(url, headers(id));
   }
+
   const getResultsImage = async (id) => {
-    const url = `${API_URL}/ia/${id}`
-    return axios.get(url, headers)
+    const url = `${API_URL}/ia/${id}`;
+    return axios.get(url, headers());
   }
 
 
-  const setMessages = async (payload) => {
-    const url = `${API_URL}/send/${id}`
-    return axios.get(url, payload, headers)
+
+  const sendConfirmationAndMessage = async (payload) => {
+    const url = `${API_URL}/sms/contacts`; 
+    return axios.post(url, payload, headers());
   }
 
   return {
     getResultsMessage,
     getResultsImage,
-    
     getMetrics,
-    setMessages
+    
+    sendConfirmationAndMessage,
   }
 }
-
-
-
-

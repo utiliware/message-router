@@ -1,6 +1,8 @@
 import { Container,Divider, Input, Select, Option, Box, Stack, Button  } from "@mui/joy";
 import { Grid, styled } from '@mui/joy'
-import { useState } from "react";
+import { useState, useContext } from "react";
+import { useApi } from "../../../../endpoint/api-base";
+import { useIdx } from "../../../../context";
 
 const Item = styled(Box)(({ theme }) => ({
   backgroundColor: '#fff',
@@ -14,7 +16,9 @@ const Item = styled(Box)(({ theme }) => ({
 }));
 
 export default function Message() {
-    const [contact, setContact] = useState("phone")
+    const { setIdx, setMessageIA } = useIdx()
+    const { sendConfirmationAndMessage } = useApi()
+    const [contact, setContact] = useState("email")
     const [form, setForm] = useState({
         lada: "",
         number: "",
@@ -23,9 +27,19 @@ export default function Message() {
         message: "",
     });
     const [contactStorage, setContactStorage] = useState([])
+    const [ids, setIds] = useState(1)
+    const [messageTo, setMessageTo] = useState("")
 
     const hasData = contactStorage.length > 0 && Object.keys(contactStorage[0]).length > 0;
 
+    const handleIdx = (e) => {
+        setIds(e.target.value)
+        setIdx(e.target.value)
+    }
+    const handleMessage = (e) => {
+        setMessageTo(e.target.value)
+        setMessageIA(e.target.value)
+    }
     const handleContact = (e, value) => setContact(value);
     const handleDomain = (e, value) => setForm((prev) => ({ ...prev, domain: value }));
 
@@ -43,9 +57,9 @@ export default function Message() {
 
 
     const isValid = () => {
-        if (contact === "phone" && (!form.lada || !form.number)) {
-            return false;
-        }
+        // if (contact === "phone" && (!form.lada || !form.number)) {
+        //     return false;
+        // }
         if (contact === "email" && (!form.email || !form.domain)) {
             return false;
         }
@@ -56,27 +70,49 @@ export default function Message() {
         if (!isValid()) return;
         const contactArray = [];
 
-        if (contact === "phone") {
-            contactArray.push({
-            id: Date.now(), // Es temporal
-            type: 'phone',
-            lada: form.lada,
-            number: form.number,
-            });
-        }
+        // if (contact === "phone") {
+        //     contactArray.push({
+        //     id: Date.now(), // Es temporal
+        //     type: 'phone',
+        //     lada: form.lada,
+        //     number: form.number,
+        //     });
+        // }
 
         if (contact === "email") {
-            contactArray.push({
-            id: Date.now(), // Es temporal
-            type: 'email',
-            email: form.email,
-            domains: form.domain,
-            });
+            // contactArray.push({
+            //     id: Date.now(), // Es temporal
+            //     type: 'email',
+            //     email: form.email,
+            //     domains: form.domain,
+            // });
+
+            try {
+                const sendConfirmationResp = sendConfirmationAndMessage(
+                {
+                    id: ids, 
+                    method: 'valid',
+                    type: 'email',
+                    email: form.email,
+                    domains: form.domain,
+                })
+                console.log(sendConfirmationResp)
+                contactArray.push({
+                    id: ids, 
+                    type: 'email',
+                    email: form.email,
+                    domains: form.domain,
+                });
+            } catch (error) {
+                console.log(sendConfirmationResp)
+            }
+
         }
 
         const newItem = {
-            id: Date.now(), // Es temporal
-            message: form.message,
+            id: ids,
+            method: "send",
+            message: messageTo,
             contact: contactArray,
         };
 
@@ -86,7 +122,7 @@ export default function Message() {
             number: "",
             email: "",
             domain: "@gmail.com",
-            message: "",
+            message: messageTo,
         });
     };
 
@@ -96,13 +132,29 @@ export default function Message() {
         );
     };
 
+    const sendMessage = async () => {
+        const payload = {
+            "method": `${contactStorage[0].method}`,
+            "id": `${contactStorage[0].id}`,
+            "message": `${contactStorage[0].message}`
+        }
+        console.log(payload)
+        const sendMessage = sendConfirmationAndMessage(payload)
+        console.log(sendMessage)
+    }
     return (
         <Container>
             <Box>
+                  <Input
+                    placeholder="Write id..."
+                    value={ids}
+                    onChange={handleIdx}
+                    sx={{ width: "20%", mb: 2 }}
+                />
                 <Input
                     placeholder="Write your message..."
-                    value={form.message}
-                    onChange={handleFormChange("message")}
+                    value={messageTo}
+                    onChange={handleMessage}
                     sx={{ width: "100%", mb: 2 }}
                 />
                 <Stack
@@ -118,7 +170,7 @@ export default function Message() {
                         sx={{ width: "20%" }}
                         onChange={handleContact}
                     >
-                        <Option value="phone">Phone</Option>
+                        {/* <Option value="phone">Phone</Option> */}
                         <Option value="email">Emails</Option>
                     </Select>
                     {contact === "phone" ? (
@@ -236,7 +288,10 @@ export default function Message() {
                         "&:hover": {
                             backgroundColor: "rgb(187, 109, 32)"
                         }
-                    }}>
+                    }}
+                    onClick={sendMessage}
+                    >
+
                     Send
                 </Button>
             </Box>
