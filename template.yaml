@@ -86,6 +86,31 @@ Resources:
             Method: post
             RestApiId: !Ref MessageApi
 
+  # ---------|| Lambda Function for Dashboard Metrics ||---------
+  DashboardLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_dashboard/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          SNS_TOPIC_NAME: !Ref SNSTopicName
+          SQS_QUEUE_NAME: !Ref MessageQueueName
+          LAMBDA_FUNCTION_NAME: !Sub "${AWS::StackName}-${ApiFunction}"
+      Policies:
+        - CloudWatchReadOnlyAccess
+        - AWSXRayDaemonWriteAccess
+      Events:
+        MetricsApiGet:
+          Type: Api
+          Properties:
+            Path: /dashboard
+            Method: get
+            RestApiId: !Ref MessageApi
+
   # --- Lambda Dispatcher: SQS1 -> EventBridge ---
   LambdaDispatcher:
     Type: AWS::Serverless::Function
