@@ -39,9 +39,7 @@ Globals:
 
 Resources:
 
-  # ------------------------------------| API Gateway, Lambda and SQS |------------------------------------
-
-  # ---------|| Layer for common dependencies ||---------
+  # --- Layer with dependencies ---
   CommonDependenciesLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -49,9 +47,7 @@ Resources:
       CompatibleRuntimes:
         - python3.12
 
-
-
-  # ---------|| API Gateway ||---------
+  # --- API Gateway with CORS ---
   MessageApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -61,10 +57,9 @@ Resources:
         AllowMethods: "'OPTIONS,POST,GET'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
-
-
-
-  # ---------|| WebSocket API Gateway ||---------
+        
+    # --- API Websocket para desplegar prompts en frontend ---
+  
   MessageWebSocketApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -72,9 +67,7 @@ Resources:
       ProtocolType: WEBSOCKET
       RouteSelectionExpression: "$request.body.action"
 
-
-
-  # ---------|| Lambdas for WebSocket connections management ||---------
+  # Lambda para $connect (guardar conexión)
   WebSocketConnectLambda:
     Type: AWS::Serverless::Function
     Properties:
@@ -89,9 +82,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
 
-
-
-  # ---------|| Lambda para $connect (nueva conexión) ||---------
+  # Lambda para $disconnect (eliminar conexión)
   WebSocketDisconnectLambda:
     Type: AWS::Serverless::Function
     Properties:
@@ -107,8 +98,7 @@ Resources:
             TableName: !Ref ConnectionsTable
 
 
-
-  # ---------|| WebSocket Integrations and Routes ||---------
+    # --- Integración WebSocket $connect ---
   WebSocketConnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -117,9 +107,7 @@ Resources:
       IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectLambda.Arn}/invocations"
       IntegrationMethod: POST
 
-
-
-  # ---------|| WebSocket Disconnect Integration ||---------
+  # --- Integración WebSocket $disconnect ---
   WebSocketDisconnectIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -127,9 +115,7 @@ Resources:
       IntegrationType: AWS_PROXY
       IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectLambda.Arn}/invocations"
 
-
-
-  # ---------|| WebSocket Routes ||---------
+  # --- Rutas ---
   WebSocketConnectRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -137,9 +123,6 @@ Resources:
       RouteKey: $connect
       Target: !Sub "integrations/${WebSocketConnectIntegration.IntegrationId}"
 
-
-
-  # ---------|| WebSocket Disconnect Route ||---------
   WebSocketDisconnectRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -148,8 +131,6 @@ Resources:
       Target: !Sub "integrations/${WebSocketDisconnectIntegration.IntegrationId}"
 
 
-
-  # ---------|| Permissions for API Gateway to invoke Lambdas ||---------
   PermissionForApiToInvokeConnectLambda:
     Type: AWS::Lambda::Permission
     Properties:
@@ -158,9 +139,6 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$connect"
 
-
-
-  # ---------|| Permissions for API Gateway to invoke Lambdas ||---------
   PermissionForApiToInvokeDisconnectLambda:
     Type: AWS::Lambda::Permission
     Properties:
@@ -170,8 +148,7 @@ Resources:
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$disconnect"
 
 
-
-  # ---------|| Lambda for WebSocket $default route ||---------
+    # Lambda para $default (manejo de mensajes entrantes)
   WebSocketDefaultLambda:
     Type: AWS::Serverless::Function
     Properties:
@@ -186,9 +163,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ConnectionsTable
 
-
-
-  # ---------|| Integración WebSocket $default ||---------
+  # Integración WebSocket $default
   WebSocketDefaultIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -196,9 +171,7 @@ Resources:
       IntegrationType: AWS_PROXY
       IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDefaultLambda.Arn}/invocations"
 
-
-
-  # ---------|| Ruta $default ||---------
+  # Ruta $default
   WebSocketDefaultRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -206,9 +179,7 @@ Resources:
       RouteKey: $default
       Target: !Sub "integrations/${WebSocketDefaultIntegration.IntegrationId}"
 
-
-
-  # ---------|| Permissions for API Gateway to invoke Lambdas ||---------
+  # Permiso para que API Gateway invoque la Lambda $default
   PermissionForApiToInvokeDefaultLambda:
     Type: AWS::Lambda::Permission
     Properties:
@@ -217,9 +188,6 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$default"
 
-
-
-  # ---------|| Deployment for WebSocket API ||---------
   MessageWebSocketDeployment:
     Type: AWS::ApiGatewayV2::Deployment
     DependsOn:
@@ -229,9 +197,7 @@ Resources:
     Properties:
       ApiId: !Ref MessageWebSocketApi
   
-
-
-  # ---------|| Stage for WebSocket API ||---------
+      # --- Stage (Prod) ---
   MessageWebSocketStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
@@ -240,9 +206,13 @@ Resources:
       ApiId: !Ref MessageWebSocketApi
       AutoDeploy: true
 
+  # --- SQS Queue (API -> SQS1) ---
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref MessageQueueName
 
-
-  # ---------|| Lambda Function for API Gateway to SQS ||---------
+  # --- Lambda messgae router queue: API -> SQS ---
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -264,48 +234,7 @@ Resources:
             Method: post
             RestApiId: !Ref MessageApi
 
-
-
-  # ---------|| Lambda Function for Dashboard Metrics ||---------
-  DashboardLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/lambda_dashboard/
-      Handler: app.handler
-      Runtime: nodejs20.x
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          SNS_TOPIC_NAME: !Ref SNSTopicName
-          SQS_QUEUE_NAME: !Ref MessageQueueName
-          LAMBDA_FUNCTION_NAME: !Sub "${AWS::StackName}-${ApiFunction}"
-      Policies:
-        - CloudWatchReadOnlyAccess
-        - AWSXRayDaemonWriteAccess
-      Events:
-        MetricsApiGet:
-          Type: Api
-          Properties:
-            Path: /metrics
-            Method: get
-            RestApiId: !Ref MessageApi
-
-
-
-  # ---------|| SQS Queue 1 ||---------
-  MessageQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      QueueName: !Ref MessageQueueName
-
-
-
-
-
-  # ------------------------------------| Lambda Dispatcher and EventBridge Rule |------------------------------------
-
-  # ---------|| Lambda Dispatcher: SQS 1 -> EventBridge ||---------
+  # --- Lambda Dispatcher: SQS1 -> EventBridge ---
   LambdaDispatcher:
     Type: AWS::Serverless::Function
     Properties:
@@ -332,14 +261,12 @@ Resources:
             Queue: !GetAtt MessageQueue.Arn
             BatchSize: 1
 
-
-
-  # ---------|| EventBridge Rule to capture events from LambdaDispatcher ||---------
+  # --- EventBridge Rule 1: messages from LambdaDispatcher -> EBToSQS2Function ---
   MessageReceivedRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Ref EventBridgeOneName
-      Description: "Rule to capture MessageReceived events and route them to SQS 2 via EBToSQS2Function"
+      Description: "Rule for capturing events emitted by LambdaDispatcher"
       EventPattern:
         source:
           - my.app.messages
@@ -349,9 +276,7 @@ Resources:
         - Arn: !GetAtt EBToSQS2Function.Arn
           Id: "EBToSQS2LambdaTarget"
 
-
-
-  # ---------|| Permission for EventBridge to invoke EBToSQS2Function ||---------
+  # Permission for EventBridge to invoke EBToSQS2Function
   PermissionForEventsInvokeEBToSQS2:
     Type: AWS::Lambda::Permission
     Properties:
@@ -360,13 +285,7 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt MessageReceivedRule.Arn
 
-
-
-
-
-  # ------------------------------------| SQS 2 and Lambda to Step Functions |------------------------------------ 
-
-  # ---------|| Lambda to move messages from EventBridge to SQS 2 ||---------
+  # --- Lambda: EventBridge Rule 1 -> SQS 2 ---
   EBToSQS2Function:
     Type: AWS::Serverless::Function
     Properties:
@@ -384,9 +303,7 @@ Resources:
             Resource: !GetAtt QueueTwo.Arn
         - AWSXRayDaemonWriteAccess
 
-
-
-  # ---------|| SQS 2 and its DLQ ||---------
+  # -- SQS 2 and DLQ ---
   QueueTwoDLQ:
     Type: AWS::SQS::Queue
     Properties:
@@ -401,42 +318,7 @@ Resources:
         deadLetterTargetArn: !GetAtt QueueTwoDLQ.Arn
         maxReceiveCount: 5
 
-
-
-  # ---------|| Lambda to move messages from SQS 2 to Step Functions ||---------
-  SQS2ToStepFn:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/sqs2_to_stepfn/
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Tracing: Active
-      Environment:
-        Variables:
-          QUEUE_URL: !Ref QueueTwo
-          STATE_MACHINE_ARN: !Ref MessageProcessingStateMachine
-      Policies:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
-        - AWSXRayDaemonWriteAccess
-        - Statement:
-            - Effect: Allow
-              Action: states:StartExecution
-              Resource: !Ref MessageProcessingStateMachine
-      Events:
-        FromSQS2:
-          Type: SQS
-          Properties:
-            Queue: !GetAtt QueueTwo.Arn
-            BatchSize: 10
-            MaximumBatchingWindowInSeconds: 0
-
-
-
-
-
-  # ------------------------------------| Step Functions State Machine |------------------------------------
-
-  # ---------|| IAM Role for Step Functions ||---------
+  # --- IAM Role para Step Functions (ejecución) ---
   StepFunctionsExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -455,6 +337,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+                  # Acciones recomendadas por la doc + extras útiles
                   - logs:CreateLogGroup
                   - logs:CreateLogDelivery
                   - logs:GetLogDelivery
@@ -492,17 +375,14 @@ Resources:
                 Resource: '*'
 
 
-
-  # ---------|| Log Group for Step Functions ||---------
+  # LogGroup para los logs de Step Functions (CloudWatch)
   MessageProcessingStateMachineLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-MessageProcessingStateMachine"
       RetentionInDays: 14
 
-
-
-  # ---------|| Step Functions State Machine ||---------
+  # State Machine (CloudFormation nativa) - soporta LoggingConfiguration
   MessageProcessingStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -517,7 +397,7 @@ Resources:
               LogGroupArn: !GetAtt MessageProcessingStateMachineLogGroup.Arn
       DefinitionString: |
         {
-          "Comment": "Step Functions state machine that passes input to output",
+          "Comment": "Minimal state machine for pipeline preserving input",
           "StartAt": "PassState",
           "States": {
             "PassState": {
@@ -530,15 +410,39 @@ Resources:
         }
 
 
+  # --- Lambda: SQS 2 -> Step Functions (poller) ---
+  SQS2ToStepFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/sqs2_to_stepfn/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref QueueTwo
+          STATE_MACHINE_ARN: !Ref MessageProcessingStateMachine
+      Policies:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+        - AWSXRayDaemonWriteAccess 
+        - Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref MessageProcessingStateMachine
+      Events:
+        FromSQS2:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt QueueTwo.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 0
 
-
-
-  # ------------------------------------| EventBridge Rule 2 for Step Functions outputs to SNS |------------------------------------
+  # --- EventBridge: Rule 2 -> SNS (captura ejecuciones SFN) ---
   StepFnOutputsRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Ref EventBridgeTwoName
-      Description: "Rule to capture Step Functions execution results and send them to SNS"
+      Description: "Captures Step Functions status changes (SUCCEEDED/FAILED) and sends them to SNS"
       EventPattern:
         source:
           - aws.states
@@ -554,13 +458,7 @@ Resources:
         - Arn: !Ref MySNSTopic
           Id: "SnsTargetForStepFnOutputs"
 
-
-
-
-
-  # ------------------------------------| SNS Topic and related resources |------------------------------------
-
-  # ---------|| SNS Topic Policy for EventBridge to publish ||---------
+  # Policy that allows EventBridge to publish in SNS
   EventBridgeToSNSPolicy:
     Type: AWS::SNS::TopicPolicy
     Properties:
@@ -576,27 +474,21 @@ Resources:
             Action: sns:Publish
             Resource: !Ref MySNSTopic
 
-
-
-  # ---------|| SNS Topic ||---------
+  # --- SNS Topic ---
   MySNSTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Ref SNSTopicName
       TracingConfig: 'Active'
 
-
-
-  # ---------|| Email SNS Topic ||---------
+  # --- Email SNS Topic ---
   EmailTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: Email
       TracingConfig: 'Active'
 
-
-
-  # ---------|| Permission for SNS to invoke Lambda ||---------
+  # Permission for SNS to invoke DynamoLambda
   PermissionForSNSInvokeLambda:
     Type: AWS::Lambda::Permission
     Properties:
@@ -605,9 +497,7 @@ Resources:
       Principal: sns.amazonaws.com
       SourceArn: !Ref MySNSTopic
 
-
-
-  # ---------|| SNS Subscription from SNS to DynamoDB Lambda ||---------
+  # SNS subscription to Lambda
   DynamoLambdaSubscription:
     Type: AWS::SNS::Subscription
     DependsOn: PermissionForSNSInvokeLambda
@@ -616,9 +506,7 @@ Resources:
       Endpoint: !GetAtt DynamoLambda.Arn
       TopicArn: !Ref MySNSTopic
 
-
-
-  # ---------|| Lambda to handle SNS messages and store them in DynamoDB ||---------
+  # --- Lambda Dynamo: SNS -> DynamoDB ---
   DynamoLambda:
     Type: AWS::Serverless::Function
     Properties:
@@ -634,30 +522,7 @@ Resources:
             TableName: !Ref MessagesTable
         - AWSXRayDaemonWriteAccess
 
-
-
-
-
-  # ------------------------------------| Contacts DynamoDB Table |------------------------------------
-  ContactsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: ContactsTable
-      AttributeDefinitions:
-        - AttributeName: contactId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: contactId
-          KeyType: HASH
-      BillingMode: PAY_PER_REQUEST
-
-
-
-
-
-  # ------------------------------------| DynamoDB Table with Stream |------------------------------------
-
-  # ---------|| DynamoDB Table ||---------
+  # --- DynamoDB ---
   MessagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -672,9 +537,20 @@ Resources:
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
 
+  # --- Contacts DynamoDB Table ---
+  ContactsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ContactsTable
+      AttributeDefinitions:
+        - AttributeName: contactId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: contactId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
 
-
-  # ---------|| Lambda to move DynamoDB Stream records to S3 ||---------
+  # --- Lambda DDB to S3: DynamoDB -> S3 ---
   DdbToS3Function:
     Type: AWS::Serverless::Function
     Properties:
@@ -699,468 +575,12 @@ Resources:
         - S3WritePolicy:
             BucketName: !Ref TargetBucket
         - AWSXRayDaemonWriteAccess
-
-
-
-
-
-  # ------------------------------------| S3 and SNS for Events |------------------------------------
-
-  # ---------|| S3 Bucket with Event Notification to SNS ||---------
+  
+  # --- S3 Bucket ---
   TargetBucket:
     Type: AWS::S3::Bucket
-    DependsOn: S3EventsTopicPolicy
-    Properties:
-      NotificationConfiguration:
-        TopicConfigurations:
-          - Event: "s3:ObjectCreated:*"
-            Topic: !Ref S3EventsTopic
-        EventBridgeConfiguration:
-          EventBridgeEnabled: true
 
-
-
-  # ---------|| SNS Topic for S3 Events ||---------
-  S3EventsTopic:
-    Type: AWS::SNS::Topic
-    Properties:
-      TopicName: !Sub "${AWS::StackName}-S3Events"
-
-
-
-  # ---------|| SNS Topic Policy for S3 to publish ||---------
-  S3EventsTopicPolicy:
-    Type: AWS::SNS::TopicPolicy
-    Properties:
-      Topics:
-        - !Ref S3EventsTopic
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sns:Publish
-            Resource: !Ref S3EventsTopic
-
-
-
-
-
-  # ------------------------------------| Bedrock Text Agent |------------------------------------
-
-  # ---------|| SNS Subscription from S3 to Lambda ||---------
-  S3EventsSubscription:
-    Type: AWS::SNS::Subscription
-    Properties:
-      TopicArn: !Ref S3EventsTopic
-      Protocol: lambda
-      Endpoint: !GetAtt S3ToBedrockFunction.Arn
-
-
-
-  # ---------|| Permission for SNS to invoke Lambda ||---------
-  PermissionForSNSToInvokeLambda:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref S3ToBedrockFunction
-      Action: lambda:InvokeFunction
-      Principal: sns.amazonaws.com
-      SourceArn: !Ref S3EventsTopic
-
-
-
-  # ---------|| Lambda to send S3 objects to Bedrock Text Agent ||---------
-  S3ToBedrockFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/lambda_s3_to_bedrock/
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Timeout: 30
-      Tracing: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !ImportValue LambdaSecurityGroupId
-        SubnetIds:
-          - !ImportValue PrivateSubnet1Id
-          - !ImportValue PrivateSubnet2Id
-      Environment:
-        Variables:
-          VALKEY_HOST: !ImportValue ValkeyEndpointAddress
-          VALKEY_PORT: !ImportValue ValkeyEndpointPort
-      Policies:
-        - Statement:
-            Effect: Allow
-            Action: s3:GetObject
-            Resource: !Sub "${TargetBucket.Arn}/*"
-        - Statement:
-            Effect: Allow
-            Action: bedrock:InvokeModel
-            Resource: "*"
-        - AWSXRayDaemonWriteAccess
-
-
-
-
-
-  # ------------------------------------| Bedrock Image Generation |------------------------------------
-
-  # ---------|| S3 Bucket for generated images ||---------
-  GeneratedImagesBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "${AWS::StackName}-generated-images"
-
-
-
-  # ---------|| Lambda to send S3 objects to Bedrock (Image generation) ||---------
-  S3ToBedrockImageFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub '${AWS::StackName}-S3ToBedrockImageHandler'
-      CodeUri: backend/src/handlers/lambda_s3_to_bedrock_image/
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Timeout: 120
-      Tracing: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !ImportValue LambdaSecurityGroupId
-        SubnetIds:
-          - !ImportValue PrivateSubnet1Id
-          - !ImportValue PrivateSubnet2Id
-      Environment:
-        Variables:
-          MODEL_ID: "amazon.nova-canvas-v1:0"
-          OUTPUT_BUCKET: !Ref GeneratedImagesBucket
-      Policies:
-        - Statement:
-            Effect: Allow
-            Action:
-              - s3:GetObject
-            Resource: !Sub "${TargetBucket.Arn}/*"
-        - S3WritePolicy:
-            BucketName: !Ref GeneratedImagesBucket 
-        - Statement:
-            Effect: Allow
-            Action:
-              - bedrock:InvokeModel
-            Resource: "*"
-        - AWSXRayDaemonWriteAccess
-
-
-
-  # ---------|| Permission for SNS to invoke Image Lambda ||---------
-  PermissionForSNSToInvokeImageLambda:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref S3ToBedrockImageFunction
-      Action: lambda:InvokeFunction
-      Principal: sns.amazonaws.com
-      SourceArn: !Ref S3EventsTopic
-
-
-
-  # ---------|| SNS Subscription from S3 to Bedrock Image Lambda ||---------
-  S3ImageEventsSubscription:
-    Type: AWS::SNS::Subscription
-    DependsOn: PermissionForSNSToInvokeImageLambda
-    Properties:
-      TopicArn: !Ref S3EventsTopic
-      Protocol: lambda
-      Endpoint: !GetAtt S3ToBedrockImageFunction.Arn
-
-
-
-
-
-  # ------------------------------------| OpenSearch Indexing |------------------------------------
-
-  # ---------|| EventBridge ||---------
-  S3ToOpenSearchRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${AWS::StackName}-S3ToOpenSearchRule"
-      Description: "Rule to capture S3 Object Created events and start OpenSearch Indexing Step Function"
-      EventPattern:
-        source:
-          - "aws.s3"
-        detail-type:
-          - "Object Created"
-        detail:
-          bucket:
-            name:
-              - !Ref TargetBucket
-      Targets:
-        - Arn: !Ref OpenSearchIndexingStateMachine
-          Id: "StartOpenSearchSFNFromS3"
-          RoleArn: !GetAtt EventBridgeStartOpenSearchSfnRole.Arn
-          InputTransformer:
-            InputPathsMap:
-              bucket: "$.detail.bucket.name"
-              key: "$.detail.object.key"
-            InputTemplate: '{"bucket": <bucket>, "key": <key>}'
-
-
-
-  # ---------|| IAM Role for EventBridge to start Step Function ||---------
-  EventBridgeStartOpenSearchSfnRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: AllowStartExecutionOnOpenSearchSFN
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - states:StartExecution
-                Resource: !Ref OpenSearchIndexingStateMachine
-
-
-
-  # ---------|| Step Function ||---------
-  OpenSearchIndexingStateMachine:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      StateMachineName: !Sub "${AWS::StackName}-OpenSearchIndexingStateMachine"
-      RoleArn: !GetAtt OpenSearchIndexingStateMachineRole.Arn
-      TracingConfiguration:
-        Enabled: true
-      LoggingConfiguration:
-        Level: ALL
-        IncludeExecutionData: true
-        Destinations:
-          - CloudWatchLogsLogGroup:
-              LogGroupArn: !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
-
-      DefinitionString: !Sub |
-        {
-          "Comment": "State machine to index S3 objects to OpenSearch",
-          "StartAt": "IndexS3Object",
-          "States": {
-            "IndexS3Object": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::lambda:invoke",
-              "Parameters": {
-                "FunctionName": "${IndexToOpenSearchFunction.Arn}",
-                "Payload.$": "$"
-              },
-              "Retry": [
-                {
-                  "ErrorEquals": ["States.ALL"],
-                  "IntervalSeconds": 5,
-                  "MaxAttempts": 2,
-                  "BackoffRate": 2.0
-                }
-              ],
-              "End": true
-            }
-          }
-        }
-
-
-
-  # ---------|| Log Group for OpenSearch Indexing State Machine ||---------
-  OpenSearchIndexingStateMachineLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine"
-      RetentionInDays: 14
-
-
-  # ---------|| IAM Role for OpenSearch Indexing State Machine ||---------
-  OpenSearchIndexingStateMachineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: states.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: OpenSearchIndexingSFN-Logs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogDelivery
-                  - logs:GetLogDelivery
-                  - logs:UpdateLogDelivery
-                  - logs:DeleteLogDelivery
-                  - logs:ListLogDeliveries
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:PutResourcePolicy
-                  - logs:DescribeResourcePolicies
-                  - logs:DescribeLogGroups
-                  - logs:PutDestination
-                  - logs:PutDestinationPolicy
-                  - logs:AssociateKmsKey
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine:*"
-
-        - PolicyName: OpenSearchIndexingSFN-InvokeLambda
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource:
-                  - !GetAtt IndexToOpenSearchFunction.Arn
-
-
-
-  # ---------|| Lambda to index S3 objects to OpenSearch ||---------
-  IndexToOpenSearchFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/index_to_opensearch/
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          S3_BUCKET: !Ref TargetBucket
-          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
-          OPENSEARCH_INDEX: messages
-          OPENSEARCH_MASTER_SECRET_ARN: !Ref OpenSearchMasterUserSecret
-      Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref TargetBucket
-        - Statement:
-            - Effect: Allow
-              Action:
-                - es:ESHttpPost
-                - es:ESHttpPut
-                - es:ESHttpPatch
-                - es:ESHttpGet
-              Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
-        - Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Ref OpenSearchMasterUserSecret
-        - AWSXRayDaemonWriteAccess
-
-
-
-  # ---------|| Secret for OpenSearch Master User ||---------
-  OpenSearchMasterUserSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub "${AWS::StackName}-OpenSearchMasterUser"
-      Description: "Master user credentials for OpenSearch Dashboards"
-      GenerateSecretString:
-        SecretStringTemplate: '{"username":"master-user"}'
-        GenerateStringKey: "password"
-        ExcludePunctuation: false
-        ExcludeCharacters: '"@\/\\`'
-        PasswordLength: 20
-
-
-  # ---------|| OpenSearch Domain ||---------
-  OpenSearchDomain:
-    Type: AWS::OpenSearchService::Domain
-    Properties:
-      DomainName: "msg-domain"
-      EngineVersion: OpenSearch_2.11
-      ClusterConfig:
-        InstanceType: t3.small.search
-        InstanceCount: 1
-      EBSOptions:
-        EBSEnabled: true
-        VolumeSize: 10
-      EncryptionAtRestOptions:
-        Enabled: true
-      NodeToNodeEncryptionOptions:
-        Enabled: true
-      DomainEndpointOptions:
-        EnforceHTTPS: true
-      AdvancedSecurityOptions:
-        Enabled: true
-        InternalUserDatabaseEnabled: true
-        MasterUserOptions:
-          MasterUserName: "master-user"
-          MasterUserPassword: !Sub '{{resolve:secretsmanager:${OpenSearchMasterUserSecret}:SecretString:password}}'
-      AccessPolicies:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action: "es:*"
-            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
-          - Effect: Allow
-            Principal: "*"
-            Action:
-              - es:ESHttpGet
-              - es:ESHttpPost
-              - es:ESHttpPut
-              - es:ESHttpDelete
-              - es:ESHttpHead
-            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
-
-
-
-
-
-  # ------------------------------------| X-Ray |------------------------------------
-  XRayResourcePolicyForSNS:
-    Type: AWS::XRay::ResourcePolicy
-    Properties:
-      PolicyName: !Sub "AllowSNSXRayPutTraceSegments-${AWS::StackName}"
-      PolicyDocument: !Sub |
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Sid": "SNSAccess",
-              "Effect": "Allow",
-              "Principal": { "Service": "sns.amazonaws.com" },
-              "Action": [
-                "xray:PutTraceSegments",
-                "xray:GetSamplingRules",
-                "xray:GetSamplingTargets"
-              ],
-              "Resource": "*",
-              "Condition": {
-                "StringEquals": { "aws:SourceAccount": "${AWS::AccountId}" },
-                "StringLike": { "aws:SourceArn": "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:*" }
-              }
-            }
-          ]
-        }
-
-
-
-
-
-  # ------------------------------------| Metrics and SMS Validation |------------------------------------
-
-  # ---------|| Lambda to provide Metrics for API Gateway ||---------
+  # --- Lambda que expone métricas ---
   MetricsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1179,9 +599,7 @@ Resources:
             Method: get
             RestApiId: !Ref MessageApi
 
-
-
-  # ---------|| Lambda to handle SMS Validation and store contacts in DynamoDB ||---------
+  # --- Lambda SMS Validation and Send ---
   SMSValidationSendFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1220,11 +638,34 @@ Resources:
             Method: options
             RestApiId: !Ref MessageApi
 
+  # X-Ray resource policy para SNS
+  XRayResourcePolicyForSNS:
+    Type: AWS::XRay::ResourcePolicy
+    Properties:
+      PolicyName: !Sub "AllowSNSXRayPutTraceSegments-${AWS::StackName}"
+      PolicyDocument: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "SNSAccess",
+              "Effect": "Allow",
+              "Principal": { "Service": "sns.amazonaws.com" },
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": { "aws:SourceAccount": "${AWS::AccountId}" },
+                "StringLike": { "aws:SourceArn": "arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:*" }
+              }
+            }
+          ]
+        }
 
-
-
-
-  # ------------------------------------| Dashboard |------------------------------------
+  # --- Dashboard ---
   CloudWatchDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -1409,9 +850,6 @@ Resources:
             }
 
 
-
-
-
 Outputs:
   ApiUrl:
     Description: "API Gateway endpoint"
@@ -1428,3 +866,6 @@ Outputs:
   MetricsApiUrl:
     Description: "API Gateway endpoint para métricas"
     Value: !Sub "https://${MessageApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/metrics"
+  ContactsApiUrl:
+    Description: "API Gateway endpoint para contactos"
+    Value: !Sub "https://${MessageApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/contacts"
