@@ -39,7 +39,10 @@ export const useApi = () => {
     return axios.get(url, headers());
   }
 
-
+  const getBedrockResponse = async (id) => {
+    const url = `${API_URL}/bedrock/${id}`;
+    return axios.get(url, headers());
+  }
 
   const sendConfirmationAndMessage = async (payload) => {
     const url = `${API_URL}/sms/contacts`; 
@@ -49,6 +52,7 @@ export const useApi = () => {
   return {
     getResultsMessage,
     getResultsImage,
+    getBedrockResponse,
     getMetrics,
     
     sendConfirmationAndMessage,
