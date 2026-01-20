@@ -801,6 +801,8 @@ Resources:
         Variables:
           VALKEY_HOST: !ImportValue ValkeyEndpointAddress
           VALKEY_PORT: !ImportValue ValkeyEndpointPort
+          WEBSOCKET_ENDPOINT: !Sub "https://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
 
 
       Policies:
@@ -821,6 +823,22 @@ Resources:
 
         # --- X-Ray ---
         - AWSXRayDaemonWriteAccess
+        
+        # --- Permiso para leer conexiones WebSocket de DynamoDB ---
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+        
+        # --- Permiso para enviar mensajes a WebSocket API Gateway ---
+        - Statement:
+            Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/*"
+
+
+
+
+
 
   # ------------------------------------| Bedrock Image Generation |------------------------------------
 

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // CHANGE URL
-const API_URL = 'https://lzmjphtx8l.execute-api.us-east-1.amazonaws.com/Prod/send';
+const API_URL = 'https://hnbytph7gj.execute-api.us-east-1.amazonaws.com/Prod/send';
 
 const headers = (id = null) => {
   if (id != null) {
