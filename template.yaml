@@ -267,29 +267,29 @@ Resources:
 
 
   # ---------|| Lambda Function for Dashboard Metrics ||---------
-  DashboardLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/lambda_dashboard/
-      Handler: app.handler
-      Runtime: nodejs20.x
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          SNS_TOPIC_NAME: !Ref SNSTopicName
-          SQS_QUEUE_NAME: !Ref MessageQueueName
-          LAMBDA_FUNCTION_NAME: !Sub "${AWS::StackName}-${ApiFunction}"
-      Policies:
-        - CloudWatchReadOnlyAccess
-        - AWSXRayDaemonWriteAccess
-      Events:
-        MetricsApiGet:
-          Type: Api
-          Properties:
-            Path: /metrics
-            Method: get
-            RestApiId: !Ref MessageApi
+  # DashboardLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: backend/src/handlers/lambda_dashboard/
+  #     Handler: app.handler
+  #     Runtime: nodejs20.x
+  #     Timeout: 30
+  #     Tracing: Active
+  #     Environment:
+  #       Variables:
+  #         SNS_TOPIC_NAME: !Ref SNSTopicName
+  #         SQS_QUEUE_NAME: !Ref MessageQueueName
+  #         LAMBDA_FUNCTION_NAME: !Sub "${AWS::StackName}-${ApiFunction}"
+  #     Policies:
+  #       - CloudWatchReadOnlyAccess
+  #       - AWSXRayDaemonWriteAccess
+  #     Events:
+  #       MetricsApiGet:
+  #         Type: Api
+  #         Properties:
+  #           Path: /metrics
+  #           Method: get
+  #           RestApiId: !Ref MessageApi
 
 
 
@@ -778,7 +778,7 @@ Resources:
 
 
 
-  # ---------|| Lambda to send S3 objects to Bedrock Text Agent ||---------
+# ---------|| Lambda to send S3 objects to Bedrock Text Agent ||---------
   S3ToBedrockFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -788,6 +788,7 @@ Resources:
       Timeout: 30
       Tracing: Active
 
+
       VpcConfig:
         SecurityGroupIds:
           - !ImportValue LambdaSecurityGroupId
@@ -795,10 +796,12 @@ Resources:
           - !ImportValue PrivateSubnet1Id
           - !ImportValue PrivateSubnet2Id
 
+
       Environment:
         Variables:
           VALKEY_HOST: !ImportValue ValkeyEndpointAddress
           VALKEY_PORT: !ImportValue ValkeyEndpointPort
+
 
       Policies:
         # --- Leer objetos de S3 ---
@@ -813,6 +816,7 @@ Resources:
             Effect: Allow
             Action:
               - bedrock:Converse
+              - bedrock:InvokeModel
             Resource: "*"
 
         # --- X-Ray ---
@@ -889,253 +893,253 @@ Resources:
 
 
 
-  # ------------------------------------| OpenSearch Indexing |------------------------------------
+  # # ------------------------------------| OpenSearch Indexing |------------------------------------
 
-  # ---------|| EventBridge ||---------
-  S3ToOpenSearchRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${AWS::StackName}-S3ToOpenSearchRule"
-      Description: "Rule to capture S3 Object Created events and start OpenSearch Indexing Step Function"
-      EventPattern:
-        source:
-          - "aws.s3"
-        detail-type:
-          - "Object Created"
-        detail:
-          bucket:
-            name:
-              - !Ref TargetBucket
-      Targets:
-        - Arn: !Ref OpenSearchIndexingStateMachine
-          Id: "StartOpenSearchSFNFromS3"
-          RoleArn: !GetAtt EventBridgeStartOpenSearchSfnRole.Arn
-          InputTransformer:
-            InputPathsMap:
-              bucket: "$.detail.bucket.name"
-              key: "$.detail.object.key"
-            InputTemplate: '{"bucket": <bucket>, "key": <key>}'
-
-
-
-  # ---------|| IAM Role for EventBridge to start Step Function ||---------
-  EventBridgeStartOpenSearchSfnRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: events.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: AllowStartExecutionOnOpenSearchSFN
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - states:StartExecution
-                Resource: !Ref OpenSearchIndexingStateMachine
+  # # ---------|| EventBridge ||---------
+  # S3ToOpenSearchRule:
+  #   Type: AWS::Events::Rule
+  #   Properties:
+  #     Name: !Sub "${AWS::StackName}-S3ToOpenSearchRule"
+  #     Description: "Rule to capture S3 Object Created events and start OpenSearch Indexing Step Function"
+  #     EventPattern:
+  #       source:
+  #         - "aws.s3"
+  #       detail-type:
+  #         - "Object Created"
+  #       detail:
+  #         bucket:
+  #           name:
+  #             - !Ref TargetBucket
+  #     Targets:
+  #       - Arn: !Ref OpenSearchIndexingStateMachine
+  #         Id: "StartOpenSearchSFNFromS3"
+  #         RoleArn: !GetAtt EventBridgeStartOpenSearchSfnRole.Arn
+  #         InputTransformer:
+  #           InputPathsMap:
+  #             bucket: "$.detail.bucket.name"
+  #             key: "$.detail.object.key"
+  #           InputTemplate: '{"bucket": <bucket>, "key": <key>}'
 
 
 
-  # ---------|| Step Function ||---------
-  OpenSearchIndexingStateMachine:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      StateMachineName: !Sub "${AWS::StackName}-OpenSearchIndexingStateMachine"
-      RoleArn: !GetAtt OpenSearchIndexingStateMachineRole.Arn
-      TracingConfiguration:
-        Enabled: true
-      LoggingConfiguration:
-        Level: ALL
-        IncludeExecutionData: true
-        Destinations:
-          - CloudWatchLogsLogGroup:
-              LogGroupArn: !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
-
-      DefinitionString: !Sub |
-        {
-          "Comment": "State machine to index S3 objects to OpenSearch",
-          "StartAt": "IndexS3Object",
-          "States": {
-            "IndexS3Object": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::lambda:invoke",
-              "Parameters": {
-                "FunctionName": "${IndexToOpenSearchFunction.Arn}",
-                "Payload.$": "$"
-              },
-              "Retry": [
-                {
-                  "ErrorEquals": ["States.ALL"],
-                  "IntervalSeconds": 5,
-                  "MaxAttempts": 2,
-                  "BackoffRate": 2.0
-                }
-              ],
-              "End": true
-            }
-          }
-        }
+  # # ---------|| IAM Role for EventBridge to start Step Function ||---------
+  # EventBridgeStartOpenSearchSfnRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: events.amazonaws.com
+  #           Action: sts:AssumeRole
+  #     Path: /
+  #     Policies:
+  #       - PolicyName: AllowStartExecutionOnOpenSearchSFN
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - states:StartExecution
+  #               Resource: !Ref OpenSearchIndexingStateMachine
 
 
 
-  # ---------|| Log Group for OpenSearch Indexing State Machine ||---------
-  OpenSearchIndexingStateMachineLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine"
-      RetentionInDays: 14
+  # # ---------|| Step Function ||---------
+  # OpenSearchIndexingStateMachine:
+  #   Type: AWS::StepFunctions::StateMachine
+  #   Properties:
+  #     StateMachineName: !Sub "${AWS::StackName}-OpenSearchIndexingStateMachine"
+  #     RoleArn: !GetAtt OpenSearchIndexingStateMachineRole.Arn
+  #     TracingConfiguration:
+  #       Enabled: true
+  #     LoggingConfiguration:
+  #       Level: ALL
+  #       IncludeExecutionData: true
+  #       Destinations:
+  #         - CloudWatchLogsLogGroup:
+  #             LogGroupArn: !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
 
-
-  # ---------|| IAM Role for OpenSearch Indexing State Machine ||---------
-  OpenSearchIndexingStateMachineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: states.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: OpenSearchIndexingSFN-Logs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogDelivery
-                  - logs:GetLogDelivery
-                  - logs:UpdateLogDelivery
-                  - logs:DeleteLogDelivery
-                  - logs:ListLogDeliveries
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:PutResourcePolicy
-                  - logs:DescribeResourcePolicies
-                  - logs:DescribeLogGroups
-                  - logs:PutDestination
-                  - logs:PutDestinationPolicy
-                  - logs:AssociateKmsKey
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine:*"
-
-        - PolicyName: OpenSearchIndexingSFN-InvokeLambda
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - lambda:InvokeFunction
-                Resource:
-                  - !GetAtt IndexToOpenSearchFunction.Arn
+  #     DefinitionString: !Sub |
+  #       {
+  #         "Comment": "State machine to index S3 objects to OpenSearch",
+  #         "StartAt": "IndexS3Object",
+  #         "States": {
+  #           "IndexS3Object": {
+  #             "Type": "Task",
+  #             "Resource": "arn:aws:states:::lambda:invoke",
+  #             "Parameters": {
+  #               "FunctionName": "${IndexToOpenSearchFunction.Arn}",
+  #               "Payload.$": "$"
+  #             },
+  #             "Retry": [
+  #               {
+  #                 "ErrorEquals": ["States.ALL"],
+  #                 "IntervalSeconds": 5,
+  #                 "MaxAttempts": 2,
+  #                 "BackoffRate": 2.0
+  #               }
+  #             ],
+  #             "End": true
+  #           }
+  #         }
+  #       }
 
 
 
-  # ---------|| Lambda to index S3 objects to OpenSearch ||---------
-  IndexToOpenSearchFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/index_to_opensearch/
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Timeout: 30
-      Tracing: Active
-      Environment:
-        Variables:
-          S3_BUCKET: !Ref TargetBucket
-          OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
-          OPENSEARCH_INDEX: messages
-          OPENSEARCH_MASTER_SECRET_ARN: !Ref OpenSearchMasterUserSecret
-      Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref TargetBucket
-        - Statement:
-            - Effect: Allow
-              Action:
-                - es:ESHttpPost
-                - es:ESHttpPut
-                - es:ESHttpPatch
-                - es:ESHttpGet
-              Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
-        - Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Ref OpenSearchMasterUserSecret
-        - AWSXRayDaemonWriteAccess
+  # # ---------|| Log Group for OpenSearch Indexing State Machine ||---------
+  # OpenSearchIndexingStateMachineLogGroup:
+  #   Type: AWS::Logs::LogGroup
+  #   Properties:
+  #     LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine"
+  #     RetentionInDays: 14
+
+
+  # # ---------|| IAM Role for OpenSearch Indexing State Machine ||---------
+  # OpenSearchIndexingStateMachineRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: states.amazonaws.com
+  #           Action: sts:AssumeRole
+  #     Path: /
+  #     Policies:
+  #       - PolicyName: OpenSearchIndexingSFN-Logs
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - logs:CreateLogGroup
+  #                 - logs:CreateLogDelivery
+  #                 - logs:GetLogDelivery
+  #                 - logs:UpdateLogDelivery
+  #                 - logs:DeleteLogDelivery
+  #                 - logs:ListLogDeliveries
+  #                 - logs:CreateLogStream
+  #                 - logs:PutLogEvents
+  #                 - logs:PutResourcePolicy
+  #                 - logs:DescribeResourcePolicies
+  #                 - logs:DescribeLogGroups
+  #                 - logs:PutDestination
+  #                 - logs:PutDestinationPolicy
+  #                 - logs:AssociateKmsKey
+  #               Resource: "*"
+  #             - Effect: Allow
+  #               Action:
+  #                 - logs:CreateLogStream
+  #                 - logs:PutLogEvents
+  #               Resource:
+  #                 - !GetAtt OpenSearchIndexingStateMachineLogGroup.Arn
+  #                 - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}-OpenSearchIndexingStateMachine:*"
+
+  #       - PolicyName: OpenSearchIndexingSFN-InvokeLambda
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - lambda:InvokeFunction
+  #               Resource:
+  #                 - !GetAtt IndexToOpenSearchFunction.Arn
 
 
 
-  # ---------|| Secret for OpenSearch Master User ||---------
-  OpenSearchMasterUserSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub "${AWS::StackName}-OpenSearchMasterUser"
-      Description: "Master user credentials for OpenSearch Dashboards"
-      GenerateSecretString:
-        SecretStringTemplate: '{"username":"master-user"}'
-        GenerateStringKey: "password"
-        ExcludePunctuation: false
-        ExcludeCharacters: '"@\/\\`'
-        PasswordLength: 20
+  # # ---------|| Lambda to index S3 objects to OpenSearch ||---------
+  # IndexToOpenSearchFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: backend/src/handlers/index_to_opensearch/
+  #     Handler: app.lambda_handler
+  #     Runtime: python3.12
+  #     Timeout: 30
+  #     Tracing: Active
+  #     Environment:
+  #       Variables:
+  #         S3_BUCKET: !Ref TargetBucket
+  #         OPENSEARCH_ENDPOINT: !GetAtt OpenSearchDomain.DomainEndpoint
+  #         OPENSEARCH_INDEX: messages
+  #         OPENSEARCH_MASTER_SECRET_ARN: !Ref OpenSearchMasterUserSecret
+  #     Policies:
+  #       - S3ReadPolicy:
+  #           BucketName: !Ref TargetBucket
+  #       - Statement:
+  #           - Effect: Allow
+  #             Action:
+  #               - es:ESHttpPost
+  #               - es:ESHttpPut
+  #               - es:ESHttpPatch
+  #               - es:ESHttpGet
+  #             Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+  #       - Statement:
+  #           - Effect: Allow
+  #             Action:
+  #               - secretsmanager:GetSecretValue
+  #             Resource: !Ref OpenSearchMasterUserSecret
+  #       - AWSXRayDaemonWriteAccess
 
 
-  # ---------|| OpenSearch Domain ||---------
-  OpenSearchDomain:
-    Type: AWS::OpenSearchService::Domain
-    Properties:
-      DomainName: "msg-domain"
-      EngineVersion: OpenSearch_2.11
-      ClusterConfig:
-        InstanceType: t3.small.search
-        InstanceCount: 1
-      EBSOptions:
-        EBSEnabled: true
-        VolumeSize: 10
-      EncryptionAtRestOptions:
-        Enabled: true
-      NodeToNodeEncryptionOptions:
-        Enabled: true
-      DomainEndpointOptions:
-        EnforceHTTPS: true
-      AdvancedSecurityOptions:
-        Enabled: true
-        InternalUserDatabaseEnabled: true
-        MasterUserOptions:
-          MasterUserName: "master-user"
-          MasterUserPassword: !Sub '{{resolve:secretsmanager:${OpenSearchMasterUserSecret}:SecretString:password}}'
-      AccessPolicies:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
-            Action: "es:*"
-            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
-          - Effect: Allow
-            Principal: "*"
-            Action:
-              - es:ESHttpGet
-              - es:ESHttpPost
-              - es:ESHttpPut
-              - es:ESHttpDelete
-              - es:ESHttpHead
-            Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+
+  # # ---------|| Secret for OpenSearch Master User ||---------
+  # OpenSearchMasterUserSecret:
+  #   Type: AWS::SecretsManager::Secret
+  #   Properties:
+  #     Name: !Sub "${AWS::StackName}-OpenSearchMasterUser"
+  #     Description: "Master user credentials for OpenSearch Dashboards"
+  #     GenerateSecretString:
+  #       SecretStringTemplate: '{"username":"master-user"}'
+  #       GenerateStringKey: "password"
+  #       ExcludePunctuation: false
+  #       ExcludeCharacters: '"@\/\\`'
+  #       PasswordLength: 20
+
+
+  # # ---------|| OpenSearch Domain ||---------
+  # OpenSearchDomain:
+  #   Type: AWS::OpenSearchService::Domain
+  #   Properties:
+  #     DomainName: "msg-domain"
+  #     EngineVersion: OpenSearch_2.11
+  #     ClusterConfig:
+  #       InstanceType: t3.small.search
+  #       InstanceCount: 1
+  #     EBSOptions:
+  #       EBSEnabled: true
+  #       VolumeSize: 10
+  #     EncryptionAtRestOptions:
+  #       Enabled: true
+  #     NodeToNodeEncryptionOptions:
+  #       Enabled: true
+  #     DomainEndpointOptions:
+  #       EnforceHTTPS: true
+  #     AdvancedSecurityOptions:
+  #       Enabled: true
+  #       InternalUserDatabaseEnabled: true
+  #       MasterUserOptions:
+  #         MasterUserName: "master-user"
+  #         MasterUserPassword: !Sub '{{resolve:secretsmanager:${OpenSearchMasterUserSecret}:SecretString:password}}'
+  #     AccessPolicies:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+  #           Action: "es:*"
+  #           Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
+  #         - Effect: Allow
+  #           Principal: "*"
+  #           Action:
+  #             - es:ESHttpGet
+  #             - es:ESHttpPost
+  #             - es:ESHttpPut
+  #             - es:ESHttpDelete
+  #             - es:ESHttpHead
+  #           Resource: !Sub "arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/msg-domain/*"
 
 
 
@@ -1175,23 +1179,23 @@ Resources:
   # ------------------------------------| Metrics and SMS Validation |------------------------------------
 
   # ---------|| Lambda to provide Metrics for API Gateway ||---------
-  MetricsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: backend/src/handlers/lambda_metrics
-      Handler: app.lambda_handler
-      Runtime: python3.12
-      Tracing: Active
-      Policies:
-        - CloudWatchReadOnlyAccess
-        - AWSXRayDaemonWriteAccess
-      Events:
-        MetricsApiGet:
-          Type: Api
-          Properties:
-            Path: /metrics
-            Method: get
-            RestApiId: !Ref MessageApi
+  # MetricsFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: backend/src/handlers/lambda_metrics
+  #     Handler: app.lambda_handler
+  #     Runtime: python3.12
+  #     Tracing: Active
+  #     Policies:
+  #       - CloudWatchReadOnlyAccess
+  #       - AWSXRayDaemonWriteAccess
+  #     Events:
+  #       MetricsApiGet:
+  #         Type: Api
+  #         Properties:
+  #           Path: /metrics
+  #           Method: get
+  #           RestApiId: !Ref MessageApi
 
 
 
