@@ -9,9 +9,9 @@ export default function InvocationsDashboard() {
   const [lambdaErrors, setLambdaErrors] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  //CHANGE URL
+  // CHANGE URL
   useEffect(() => {
-  fetch("https://qfgfj03brg.execute-api.us-east-1.amazonaws.com/Prod/metrics", {
+  fetch("https://k8h3j63qrd.execute-api.us-east-1.amazonaws.com/Prod/metrics", {
     method: "GET",
     headers: {
       "Content-Type": "application/json",

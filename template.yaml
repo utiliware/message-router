@@ -465,22 +465,29 @@ Resources:
           CONTACTS_TABLE_NAME: !Ref ContactsTable
           EMAIL_SNS_TOPIC_ARN: !Ref EmailTopic
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ContactsTable
         - Statement:
             Effect: Allow
             Action:
-              - sns:Subscribe
-              - sns:Publish
-              - sns:Unsubscribe
+              - dynamodb:*
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - sns:*
             Resource: !Ref EmailTopic
         - AWSXRayDaemonWriteAccess
       Events:
         ContactsApiPost:
           Type: Api
           Properties:
-            Path: /contacts
+            Path: /sms/contacts
             Method: post
+            RestApiId: !Ref MessageApi
+        ContactsApiOptions:
+          Type: Api
+          Properties:
+            Path: /sms/contacts
+            Method: options
             RestApiId: !Ref MessageApi
 
   # X-Ray resource policy para SNS

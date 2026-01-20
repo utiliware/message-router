@@ -21,6 +21,19 @@ def lambda_handler(event, context):
     try:
         print(f"Event recibido: {json.dumps(event, default=str)}")
         
+        # Handle OPTIONS preflight request
+        if event.get("httpMethod") == "OPTIONS":
+            return {
+                "statusCode": 200,
+                "headers": {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type,Accept,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
+                    "Access-Control-Max-Age": "86400"
+                },
+                "body": json.dumps({"message": "CORS preflight OK"})
+            }
+        
         # Handle API Gateway event
         if 'body' in event:
             if isinstance(event['body'], str):
@@ -532,8 +545,8 @@ def response(status_code, body):
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Methods": "POST,OPTIONS"
+            "Access-Control-Allow-Headers": "Content-Type,Accept,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+            "Access-Control-Allow-Methods": "OPTIONS,POST,GET"
         },
         'body': json.dumps(body)
     }
