@@ -1077,3 +1077,6 @@ Outputs:
   BucketName:
     Description: "Name of the S3 bucket"
     Value: !Ref TargetBucket
+  MetricsApiUrl:
+    Description: "API Gateway endpoint para métricas"
+    Value: !Sub "https://${MessageApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/metrics"
