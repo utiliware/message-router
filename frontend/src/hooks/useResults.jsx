@@ -1,32 +1,37 @@
 import { useState, useEffect } from "react";
 import { useApi } from "../endpoint/api-base";
+import { useIdx } from "../context";
 
 export const useResults = () => {
-  const { getResultsMessage, getResultsImage } = useApi()
-  const [data, setData] = useState([{},""])
- 
- // Funciones de AWS que haga parseado
- // Aqui 
- //
+  const { idx, messageIA } = useIdx()
+  const { getResultsMessage, getResultsImage } = useApi();
+  const [messResult, setMessResult] = useState(null); 
+  const [iaResult, setIaResult] = useState(null); 
+  const [loading, setLoading] = useState(true);
 
   const loadResults = async () => {
+    setLoading(true);
     try {
-      const responseM = getResultsMessage("12345431232")
-      // Agregar la funcion aqui
-      setData(responseM.data); 
+      const responseM = await getResultsMessage(idx);
+      const messageData = responseM?.data || null;
+      setMessResult(messageData)
 
-      const responseI = getResultsImage("12345431232")
-      // Agregar la funcion aqui
+      const responseI = await getResultsImage(messageIA);
+      const imageData = responseI?.data || null;
+      setIaResult(imageData)
 
-      setData([responseM.data, responseI.data]);      
     } catch (error) {
-        console.log(error)
+      console.error("Error cargando resultados:", error);
+      setMessResult(null)
+      setIaResult(null)
+    } finally {
+      setLoading(false);
     }
   };
+
   useEffect(() => {
-    loadResults();
-  }, []);
+      loadResults();
+  }, [idx]);
 
-
-  return { data };
+  return { messResult, iaResult, loading, reload: loadResults };
 };

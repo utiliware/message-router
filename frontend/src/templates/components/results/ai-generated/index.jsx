@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useResults } from "../../../../hooks/useResults";
 
 export default function ResultsImage() {
-  const data = useResults()
+  const { iaResult } = useResults()
   //   const [imageUrl, setImageUrl] = useState(data[1])
     // const [imageUrl, setImageUrl] = useState("")
   const [imageUrl, setImageUrl] = useState("https://ethic.es/wp-content/uploads/2023/03/imagen-640x384.jpg")
