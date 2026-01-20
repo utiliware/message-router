@@ -1,0 +1,10 @@
+{
+  "name": "lambda_dashboard",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Lambda function to fetch CloudWatch metrics for dashboard",
+  "main": "app.mjs",
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch": "^3.0.0"
+  }
+}
