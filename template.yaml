@@ -635,9 +635,6 @@ Resources:
         - AWSXRayDaemonWriteAccess
 
 
-
-
-
   # ------------------------------------| Contacts DynamoDB Table |------------------------------------
   ContactsTable:
     Type: AWS::DynamoDB::Table
@@ -651,8 +648,19 @@ Resources:
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
 
+  # ------------------------------------| WS Connections DynamoDB Table |------------------------------------
 
-
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ConnectionsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
 
 
   # ------------------------------------| DynamoDB Table with Stream |------------------------------------
