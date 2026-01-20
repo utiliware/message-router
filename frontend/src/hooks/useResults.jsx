@@ -1,37 +1,105 @@
-import { useState, useEffect } from "react";
+// import { useState, useEffect, useRef } from "react";
+// import { useApi } from "../endpoint/api-base";
+// import { useIdx } from "../context";
+
+// export const useResults = () => {
+//   const { idx, messageIA } = useIdx();
+//   const { getResultsMessage, getResultsImage } = useApi();
+//   const [messResult, setMessResult] = useState(null); 
+//   const [iaResult, setIaResult] = useState(null); 
+//   const [loading, setLoading] = useState(false);
+//   const lastIdxRef = useRef(null);
+//   const hasLoadedRef = useRef(false);
+
+//   const loadResults = async () => {
+//     if (!idx || idx === lastIdxRef.current) {
+//       return;
+//     }
+
+//     lastIdxRef.current = idx;
+//     setLoading(true);
+    
+//     try {
+//       // const responseM = await getResultsMessage(idx);
+//       // const messageData = responseM?.data || null;
+//       // setMessResult(messageData);
+
+
+//       console.log("--------")
+//       console.log(messageIA)
+//       console.log("--------")
+
+//       // const responseI = await getResultsImage(messageIA);
+//       // const imageData = responseI?.data || null;
+//       // setIaResult(imageData);
+//       setIaResult(null);
+
+//       hasLoadedRef.current = true;
+//     } catch (error) {
+//       console.error("Error cargando resultados:", error);
+//       setMessResult(null);
+//       setIaResult(null);
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   useEffect(() => {
+//       loadResults();
+//   }, [messageIA]);
+
+//   return { messResult, iaResult, loading };
+// };
+
+import { useState, useEffect, useRef } from "react";
 import { useApi } from "../endpoint/api-base";
 import { useIdx } from "../context";
 
 export const useResults = () => {
-  const { idx, messageIA } = useIdx()
+  const { idx, messageIA } = useIdx();
   const { getResultsMessage, getResultsImage } = useApi();
   const [messResult, setMessResult] = useState(null); 
   const [iaResult, setIaResult] = useState(null); 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const lastIdxRef = useRef(null);
+  const hasLoadedRef = useRef(false);
 
   const loadResults = async () => {
-    setLoading(true);
-    try {
-      const responseM = await getResultsMessage(idx);
-      const messageData = responseM?.data || null;
-      setMessResult(messageData)
+    if (!idx || idx === lastIdxRef.current) {
+      return;
+    }
 
+    lastIdxRef.current = idx;
+    setLoading(true);
+    
+    try {
+      // const responseM = await getResultsMessage(idx);
+      // const messageData = responseM?.data || null;
+      // setMessResult(messageData);
+
+      console.log("---------")
+      console.log(messageIA)
+      console.log("---------")
+      
       const responseI = await getResultsImage(messageIA);
       const imageData = responseI?.data || null;
-      setIaResult(imageData)
+      setIaResult(imageData);
 
+      hasLoadedRef.current = true;
     } catch (error) {
       console.error("Error cargando resultados:", error);
-      setMessResult(null)
-      setIaResult(null)
+      setMessResult(null);
+      setIaResult(null);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (idx && idx !== lastIdxRef.current) {
       loadResults();
-  }, [idx]);
+    }
+  }, [idx, messageIA]);
 
   return { messResult, iaResult, loading, reload: loadResults };
 };
