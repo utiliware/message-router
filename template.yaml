@@ -52,7 +52,7 @@ Resources:
       StageName: Prod
       TracingEnabled: true
       Cors:
-        AllowMethods: "'OPTIONS,POST'"
+        AllowMethods: "'OPTIONS,POST,GET'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
 
@@ -78,6 +78,33 @@ Resources:
           Properties:
             Path: /send
             Method: post
+            RestApiId: !Ref MessageApi
+
+
+
+  # ---------|| Lambda Function for Dashboard Metrics ||---------
+  DashboardLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_dashboard/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          SNS_TOPIC_NAME: !Ref SNSTopicName
+          SQS_QUEUE_NAME: !Ref MessageQueueName
+          LAMBDA_FUNCTION_NAME: !Sub "${AWS::StackName}-${ApiFunction}"
+      Policies:
+        - CloudWatchReadOnlyAccess
+        - AWSXRayDaemonWriteAccess
+      Events:
+        MetricsApiGet:
+          Type: Api
+          Properties:
+            Path: /metrics
+            Method: get
             RestApiId: !Ref MessageApi
 
 
