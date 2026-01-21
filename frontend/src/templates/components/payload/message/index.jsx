@@ -18,7 +18,7 @@ const Item = styled(Box)(({ theme }) => ({
 export default function Message() {
     const [counter, setCounter] = useState(1)
     const { setIdx, setMessageIA } = useIdx();
-    const { sendConfirmationAndMessage } = useApi();
+    const { sendConfirmationAndMessage, sendMessage: sendMessageApi } = useApi();
     const [contact, setContact] = useState("email");
     const [form, setForm] = useState({
         lada: "",
@@ -79,6 +79,13 @@ export default function Message() {
                 });
                 
                 console.log(sendConfirmationResp);
+                
+                // Send message at the same time
+                const sendMessageResp = await sendMessageApi({
+                    message: messageTo
+                });
+                
+                console.log(sendMessageResp);
                 
                 contactArray.push({
                     id: ids, 

@@ -4,9 +4,10 @@ import { useIdx } from "../context";
 
 export const useResults = () => {
   const { idx, messageIA } = useIdx();
-  const { getResultsMessage, getResultsImage } = useApi();
+  const { getResultsMessage, getResultsImage, getBedrockResponse } = useApi();
   const [messResult, setMessResult] = useState(null); 
   const [iaResult, setIaResult] = useState(null); 
+  const [bedrockResult, setBedrockResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const lastIdxRef = useRef(null);
   const hasLoadedRef = useRef(false);
@@ -32,11 +33,16 @@ export const useResults = () => {
       const imageData = responseI?.data || null;
       setIaResult(imageData);
 
+      const responseB = await getBedrockResponse(messageIA);
+      const bedrockData = responseB?.data || null;
+      setBedrockResult(bedrockData);
+
       hasLoadedRef.current = true;
     } catch (error) {
       console.error("Error cargando resultados:", error);
       setMessResult(null);
       setIaResult(null);
+      setBedrockResult(null);
     } finally {
       setLoading(false);
     }
@@ -48,5 +54,5 @@ export const useResults = () => {
     }
   }, [idx, messageIA]);
 
-  return { messResult, iaResult, loading, reload: loadResults };
+  return { messResult, iaResult, bedrockResult, loading, reload: loadResults };
 };

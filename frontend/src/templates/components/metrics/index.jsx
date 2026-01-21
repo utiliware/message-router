@@ -14,9 +14,9 @@ export default function Metrics() {
   const [loading, setLoading] = useState(true);
 
 
-  //CAMBIAR URL
+  // CHANGE URL
   useEffect(() => {
-    fetch("https://xddm904054.execute-api.us-east-1.amazonaws.com/Prod/metrics", {
+    fetch("https://7qni20ko34.execute-api.us-east-1.amazonaws.com/Prod/dashboard", {
       method: "GET",
       headers: {
         "Content-Type": "application/json",

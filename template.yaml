@@ -39,6 +39,7 @@ Globals:
 
 Resources:
 
+  # -----------------------------------
   # --- Layer with dependencies ---
   CommonDependenciesLayer:
     Type: AWS::Serverless::LayerVersion
@@ -57,6 +58,179 @@ Resources:
         AllowMethods: "'OPTIONS,POST,GET'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
+
+  # ---------|| WebSocket API Gateway ||---------
+  MessageWebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: MessageWebSocketApi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+
+  # ---------|| Lambdas for WebSocket connections management ||---------
+  WebSocketConnectLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/websocket/connect
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+
+
+  # ---------|| Lambda para $connect (nueva conexión) ||---------
+  WebSocketDisconnectLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/websocket/disconnect
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+
+
+  # ---------|| WebSocket Integrations and Routes ||---------
+  WebSocketConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectLambda.Arn}/invocations"
+      IntegrationMethod: POST
+
+
+
+  # ---------|| WebSocket Disconnect Integration ||---------
+  WebSocketDisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectLambda.Arn}/invocations"
+
+
+
+  # ---------|| WebSocket Routes ||---------
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      RouteKey: $connect
+      Target: !Sub "integrations/${WebSocketConnectIntegration.IntegrationId}"
+
+
+
+  # ---------|| WebSocket Disconnect Route ||---------
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      RouteKey: $disconnect
+      Target: !Sub "integrations/${WebSocketDisconnectIntegration.IntegrationId}"
+
+  # ---------|| Permissions for API Gateway to invoke Lambdas ||---------
+  PermissionForApiToInvokeConnectLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketConnectLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$connect"
+
+
+
+  # ---------|| Permissions for API Gateway to invoke Lambdas ||---------
+  PermissionForApiToInvokeDisconnectLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketDisconnectLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$disconnect"
+
+
+
+  # ---------|| Lambda for WebSocket $default route ||---------
+  WebSocketDefaultLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/websocket/default
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+
+
+
+  # ---------|| Integración WebSocket $default ||---------
+  WebSocketDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDefaultLambda.Arn}/invocations"
+
+
+
+  # ---------|| Ruta $default ||---------
+  WebSocketDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+      RouteKey: $default
+      Target: !Sub "integrations/${WebSocketDefaultIntegration.IntegrationId}"
+
+
+
+  # ---------|| Permissions for API Gateway to invoke Lambdas ||---------
+  PermissionForApiToInvokeDefaultLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketDefaultLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/$default"
+
+
+
+  # ---------|| Deployment for WebSocket API ||---------
+  MessageWebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - WebSocketConnectRoute
+      - WebSocketDisconnectRoute
+      - WebSocketDefaultRoute 
+    Properties:
+      ApiId: !Ref MessageWebSocketApi
+  
+
+
+  # ---------|| Stage for WebSocket API ||---------
+  MessageWebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: Prod
+      DeploymentId: !Ref MessageWebSocketDeployment
+      ApiId: !Ref MessageWebSocketApi
+      AutoDeploy: true
 
   # --- SQS Queue (API -> SQS1) ---
   MessageQueue:
@@ -426,6 +600,18 @@ Resources:
         - AttributeName: contactId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
+  
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ConnectionsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
 
   # --- Lambda DDB to S3: DynamoDB -> S3 ---
   DdbToS3Function:
@@ -456,6 +642,22 @@ Resources:
   # --- S3 Bucket ---
   TargetBucket:
     Type: AWS::S3::Bucket
+    DependsOn: S3EventsTopicPolicy
+    Properties:
+      NotificationConfiguration:
+        TopicConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Topic: !Ref S3EventsTopic
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+
+
+  # ---------|| SNS Topic for S3 Events ||---------
+  S3EventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-S3Events"
 
   # --- Lambda que expone métricas ---
   MetricsFunction:
@@ -475,6 +677,187 @@ Resources:
             Path: /metrics
             Method: get
             RestApiId: !Ref MessageApi
+
+
+  
+# ---------|| SNS Topic Policy for S3 to publish ||---------
+  S3EventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref S3EventsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref S3EventsTopic
+
+  # ------------------------------------| Bedrock Text Agent |------------------------------------
+
+  # ---------|| SNS Subscription from S3 to Lambda ||---------
+  S3EventsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref S3EventsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt S3ToBedrockFunction.Arn
+
+
+
+  # ---------|| Permission for SNS to invoke Lambda ||---------
+  PermissionForSNSToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3ToBedrockFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref S3EventsTopic
+
+
+
+# ---------|| Lambda to send S3 objects to Bedrock Text Agent ||---------
+  S3ToBedrockFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/lambda_s3_to_bedrock/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      Tracing: Active
+
+
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue LambdaSecurityGroupId
+        SubnetIds:
+          - !ImportValue PrivateSubnet1Id
+          - !ImportValue PrivateSubnet2Id
+
+
+      Environment:
+        Variables:
+          VALKEY_HOST: !ImportValue ValkeyEndpointAddress
+          VALKEY_PORT: !ImportValue ValkeyEndpointPort
+          WEBSOCKET_ENDPOINT: !Sub "https://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
+
+
+      Policies:
+        # --- Leer objetos de S3 ---
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "${TargetBucket.Arn}/*"
+
+        # --- Permiso para Amazon Nova (Converse API) ---
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:Converse
+              - bedrock:InvokeModel
+            Resource: "*"
+
+        # --- X-Ray ---
+        - AWSXRayDaemonWriteAccess
+        
+        # --- Permiso para leer conexiones WebSocket de DynamoDB ---
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+        
+        # --- Permiso para enviar mensajes a WebSocket API Gateway ---
+        - Statement:
+            Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/*"
+
+
+
+
+
+
+  # ------------------------------------| Bedrock Image Generation |------------------------------------
+
+  # ---------|| S3 Bucket for generated images ||---------
+  GeneratedImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # Removed explicit BucketName to avoid conflicts - CloudFormation will generate unique name
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+
+
+  # ---------|| Lambda to send S3 objects to Bedrock (Image generation) ||---------
+  S3ToBedrockImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-S3ToBedrockImageHandler'
+      CodeUri: backend/src/handlers/lambda_s3_to_bedrock_image/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 120
+      Tracing: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue LambdaSecurityGroupId
+        SubnetIds:
+          - !ImportValue PrivateSubnet1Id
+          - !ImportValue PrivateSubnet2Id
+      Environment:
+        Variables:
+          MODEL_ID: "amazon.nova-canvas-v1:0"
+          OUTPUT_BUCKET: !Ref GeneratedImagesBucket
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "${TargetBucket.Arn}/*"
+        - S3WritePolicy:
+            BucketName: !Ref GeneratedImagesBucket 
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource: "*"
+        - AWSXRayDaemonWriteAccess
+
+
+
+  # ---------|| Permission for SNS to invoke Image Lambda ||---------
+  PermissionForSNSToInvokeImageLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref S3ToBedrockImageFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref S3EventsTopic
+
+
+
+  # ---------|| SNS Subscription from S3 to Bedrock Image Lambda ||---------
+  S3ImageEventsSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: PermissionForSNSToInvokeImageLambda
+    Properties:
+      TopicArn: !Ref S3EventsTopic
+      Protocol: lambda
+      Endpoint: !GetAtt S3ToBedrockImageFunction.Arn
+
 
   # --- Lambda SMS Validation and Send ---
   SMSValidationSendFunction:
