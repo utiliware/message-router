@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import boto3
 import base64
 import logging
@@ -25,6 +26,12 @@ def _extract_candidate_from_dict(d):
     for k in ("prompt", "text", "message", "Message", "body", "Body"):
         if k in d and isinstance(d[k], (str, int, float)):
             return str(d[k])
+
+    # DdbToS3 style: {"eventType": "INSERT", "item": {"MessageId": "...", "Message": "..."}}
+    if "item" in d and isinstance(d["item"], dict):
+        candidate = _extract_candidate_from_dict(d["item"])
+        if candidate is not None:
+            return candidate
 
     # SNS style: might come wrapped as {"Records": [ { "Sns": {"Message": "..."} } ] }
     if "Records" in d and isinstance(d["Records"], list) and len(d["Records"]) > 0:
@@ -91,7 +98,12 @@ def lambda_handler(event, context):
     if not extracted and isinstance(parsed, dict):
         logger.info("No candidate found at top level; searching nested dicts")
         for v in parsed.values():
-            if isinstance(v, str):
+            if isinstance(v, dict):
+                extracted = _extract_candidate_from_dict(v)
+                if extracted:
+                    logger.info("Found candidate in nested dict")
+                    break
+            elif isinstance(v, str):
                 maybe = _try_parse_json(v)
                 if isinstance(maybe, dict):
                     extracted = _extract_candidate_from_dict(maybe)
@@ -125,7 +137,7 @@ def lambda_handler(event, context):
         "taskType": "TEXT_IMAGE",
         "textToImageParams": {"text": final_prompt},
         "imageGenerationConfig": {
-            "seed": 0,
+            "seed": random.randint(0, 2**31 - 1),
             "quality": "standard",
             "width": 1024,
             "height": 1024,

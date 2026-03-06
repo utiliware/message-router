@@ -18,7 +18,7 @@ const Item = styled(Box)(({ theme }) => ({
 export default function Message() {
     const [counter, setCounter] = useState(1)
     const { setIdx, setMessageIA } = useIdx();
-    const { sendConfirmationAndMessage } = useApi();
+    const { sendConfirmationAndMessage, sendMessageToApi } = useApi();
     const [contact, setContact] = useState("email");
     const [form, setForm] = useState({
         lada: "",
@@ -30,7 +30,10 @@ export default function Message() {
     const [contactStorage, setContactStorage] = useState([]);
     const [ids, setIds] = useState(1);
     const [messageTo, setMessageTo] = useState("");
-    
+    const [messageToApi, setMessageToApi] = useState("");
+    const [apiSendLoading, setApiSendLoading] = useState(false);
+    const [apiSendFeedback, setApiSendFeedback] = useState(null);
+
     const hasData = contactStorage.length > 0 && Object.keys(contactStorage[0]).length > 0;
 
     // const handleIdx = (e) => {
@@ -130,6 +133,22 @@ export default function Message() {
         }
         setMessageIA(messageTo);
         setContactStorage([])
+    };
+
+    const handleSendToApi = async () => {
+        if (!messageToApi.trim()) return;
+        setApiSendFeedback(null);
+        setApiSendLoading(true);
+        try {
+            await sendMessageToApi(messageToApi.trim());
+            setApiSendFeedback({ type: "success", text: "Message send to API correctly." });
+            setMessageToApi("");
+        } catch (error) {
+            console.error(error);
+            setApiSendFeedback({ type: "error", text: error?.response?.data?.message || "Error sending to API." });
+        } finally {
+            setApiSendLoading(false);
+        }
     };
 
     return (
@@ -275,7 +294,37 @@ export default function Message() {
                     }}
                     onClick={sendMessage}
                 >
-                    Send
+                    Send to Email
+                </Button>
+                <Divider sx={{ my: 2 }} />
+                <Box component="span" sx={{ fontSize: "0.9rem", fontWeight: 600, display: "block", mb: 1 }}>
+                    Send to console API
+                </Box>
+                <Input
+                    placeholder="Write your message…"
+                    value={messageToApi}
+                    onChange={(e) => setMessageToApi(e.target.value)}
+                    sx={{ width: "100%", mb: 1 }}
+                    disabled={apiSendLoading}
+                />
+                {apiSendFeedback && (
+                    <Box
+                        sx={{
+                            mb: 1,
+                            fontSize: "0.85rem",
+                            color: apiSendFeedback.type === "success" ? "success.600" : "danger.600",
+                        }}
+                    >
+                        {apiSendFeedback.text}
+                    </Box>
+                )}
+                <Button
+                    onClick={handleSendToApi}
+                    disabled={!messageToApi.trim() || apiSendLoading}
+                    loading={apiSendLoading}
+                    sx={{ width: "100%" }}
+                >
+                    Send to console API
                 </Button>
             </Box>
         </Container>
