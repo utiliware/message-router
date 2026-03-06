@@ -57,7 +57,7 @@ export default function LandingPage() {
   return (
     <>
       <CssBaseline />
-      <Container sx={{ mt: 2 }}>
+      <Container sx={{ mt: 1 }}>
         {/* <Header /> */}
         <Title />
         <Payload />
