@@ -847,8 +847,11 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub
-        - "${AWS::StackName}-generated-images-${StackUniqueId}"
+        - "genimg-${StackUniqueId}"
         - StackUniqueId: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
 
 
 
