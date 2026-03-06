@@ -846,7 +846,9 @@ Resources:
   GeneratedImagesBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${AWS::StackName}-generated-images"
+      BucketName: !Sub
+        - "${AWS::StackName}-generated-images-${StackUniqueId}"
+        - StackUniqueId: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
 
 
 
