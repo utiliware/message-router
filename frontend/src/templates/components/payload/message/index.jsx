@@ -27,8 +27,8 @@ export default function Message() {
         if (data.source === "cache" || data.source === "bedrock") {
             setMessageIA(data.prompt);
         }
-        if (data.source === "image" && data.imageUrl) {
-            setWsImageUrl(data.imageUrl);
+        if (data.source === "image") {
+            setWsImageUrl(data.imageUrl || null);
         }
     }, [setMessageIA, setWsImageUrl]);
 

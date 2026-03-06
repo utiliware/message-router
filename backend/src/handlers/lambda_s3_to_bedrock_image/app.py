@@ -96,6 +96,8 @@ def _broadcast_websocket(prompt, out_key, bucket):
         )
     except Exception as e:
         logger.warning("No se pudo generar presigned URL: %s", e)
+    if not image_url:
+        logger.warning("imageUrl vacío en payload WebSocket; el frontend no podrá mostrar la imagen")
     payload = json.dumps({
         "prompt": prompt,
         "response": out_key,
