@@ -4,14 +4,20 @@ import random
 import boto3
 import base64
 import logging
+from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-s3 = boto3.client("s3")
+s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+dynamodb = boto3.resource("dynamodb")
+
 MODEL_ID = os.environ.get("MODEL_ID", "amazon.nova-canvas-v1:0")
 OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET")
+WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
+CONNECTIONS_TABLE = os.environ.get("CONNECTIONS_TABLE")
+table = dynamodb.Table(CONNECTIONS_TABLE) if CONNECTIONS_TABLE else None
 
 def _try_parse_json(s):
     try:
@@ -55,6 +61,70 @@ def _extract_candidate_from_dict(d):
 
 def build_prompt_from_text(extracted_text):
     return f"Generate a high-resolution, photorealistic image of: {extracted_text}"
+
+
+def _remove_stale_connection(connection_id):
+    """Elimina conexiones caducadas de DynamoDB."""
+    if not table:
+        return
+    try:
+        table.delete_item(Key={"connectionId": connection_id})
+        logger.info("Eliminada conexión caducada: %s", connection_id)
+    except Exception as e:
+        logger.warning("Error al eliminar conexión %s: %s", connection_id, e)
+
+
+def _broadcast_websocket(prompt, out_key, bucket):
+    """Envía el resultado de imagen a todas las conexiones activas del WebSocket."""
+    if not WEBSOCKET_ENDPOINT:
+        logger.info("WEBSOCKET_ENDPOINT no configurado, saltando broadcast")
+        return
+    if not CONNECTIONS_TABLE or not table:
+        logger.info("CONNECTIONS_TABLE no configurado, saltando broadcast")
+        return
+    try:
+        ws_client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
+    except Exception as e:
+        logger.warning("No se pudo crear cliente apigatewaymanagementapi: %s", e)
+        return
+    image_url = ""
+    try:
+        image_url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": out_key},
+            ExpiresIn=3600,
+        )
+    except Exception as e:
+        logger.warning("No se pudo generar presigned URL: %s", e)
+    payload = json.dumps({
+        "prompt": prompt,
+        "response": out_key,
+        "source": "image",
+        "bucket": bucket,
+        "timestamp": datetime.utcnow().isoformat(),
+        "imageUrl": image_url,
+    })
+    try:
+        connections = table.scan().get("Items", [])
+    except Exception as e:
+        logger.warning("Error al leer ConnectionsTable: %s", e)
+        return
+    logger.info("Enviando mensaje de imagen a %d conexiones", len(connections))
+    for conn in connections:
+        connection_id = conn.get("connectionId")
+        if not connection_id:
+            continue
+        try:
+            ws_client.post_to_connection(
+                ConnectionId=connection_id,
+                Data=payload.encode("utf-8"),
+            )
+        except ws_client.exceptions.GoneException:
+            logger.info("Conexión caducada: %s", connection_id)
+            _remove_stale_connection(connection_id)
+        except Exception as e:
+            logger.warning("Error enviando a %s: %s", connection_id, e)
+
 
 def lambda_handler(event, context):
     logger.info("Event received: %s", json.dumps(event))
@@ -195,5 +265,7 @@ def lambda_handler(event, context):
     out_key = f"generated-images/{safe_base}-nova-canvas.png"
     s3.put_object(Bucket=OUTPUT_BUCKET, Key=out_key, Body=img_bytes, ContentType="image/png")
     logger.info("Saved generated image to s3://%s/%s", OUTPUT_BUCKET, out_key)
+
+    _broadcast_websocket(final_prompt, out_key, OUTPUT_BUCKET)
 
     return {"statusCode": 200, "body": json.dumps({"out_key": out_key})}

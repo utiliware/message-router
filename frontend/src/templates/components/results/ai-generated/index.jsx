@@ -1,40 +1,49 @@
 import { Box, Typography } from "@mui/joy";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useResults } from "../../../../hooks/useResults";
+import { useIdx } from "../../../../context";
 
 export default function ResultsImage() {
-  const { iaResult } = useResults()
-  //   const [imageUrl, setImageUrl] = useState(data[1])
-    // const [imageUrl, setImageUrl] = useState("")
-  const [imageUrl, setImageUrl] = useState("https://ethic.es/wp-content/uploads/2023/03/imagen-640x384.jpg")
-  
+  const { iaResult } = useResults();
+  const { wsImageUrl } = useIdx();
+  const [loadError, setLoadError] = useState(false);
+  const imageUrl = wsImageUrl || (typeof iaResult === "string" ? iaResult : iaResult?.url) || null;
+  const showImage = imageUrl && !loadError;
+
+  useEffect(() => setLoadError(false), [imageUrl]);
+
   return (
     <Box
       sx={{
         width: "100%",
-        height: 300,
+        minHeight: showImage ? 0 : 300,
         borderRadius: 1,
-        bgcolor: imageUrl ? "transparent" : "primary.700",
+        bgcolor: showImage ? "transparent" : "primary.700",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        cursor: imageUrl ? "pointer" : "default",
-        overflow: "hidden"
+        cursor: showImage ? "pointer" : "default",
+        overflow: "hidden",
       }}
     >
-      {imageUrl ? (
+      {showImage ? (
         <img
           src={imageUrl}
           alt="Resultado"
+          crossOrigin="anonymous"
+          onLoad={() => setLoadError(false)}
+          onError={() => setLoadError(true)}
           style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
+            maxWidth: "100%",
+            width: "auto",
+            height: "auto",
+            display: "block",
+            objectFit: "contain",
           }}
         />
       ) : (
         <Typography level="h6" textColor="common.white">
-          No imagen
+          {imageUrl && loadError ? "Error al cargar la imagen" : "No imagen"}
         </Typography>
       )}
     </Box>

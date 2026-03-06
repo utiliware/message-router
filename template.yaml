@@ -849,6 +849,11 @@ Resources:
       BucketName: !Sub
         - "genimg-${StackUniqueId}"
         - StackUniqueId: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ["*"]
+            AllowedMethods: [GET, HEAD]
+            AllowedOrigins: ["*"]
       Tags:
         - Key: StackName
           Value: !Ref AWS::StackName
@@ -875,12 +880,19 @@ Resources:
         Variables:
           MODEL_ID: "amazon.nova-canvas-v1:0"
           OUTPUT_BUCKET: !Ref GeneratedImagesBucket
+          WEBSOCKET_ENDPOINT: !Sub "https://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+          CONNECTIONS_TABLE: !Ref ConnectionsTable
       Policies:
         - Statement:
             Effect: Allow
             Action:
               - s3:GetObject
             Resource: !Sub "${TargetBucket.Arn}/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "${GeneratedImagesBucket.Arn}/*"
         - S3WritePolicy:
             BucketName: !Ref GeneratedImagesBucket 
         - Statement:
@@ -888,6 +900,13 @@ Resources:
             Action:
               - bedrock:InvokeModel
             Resource: "*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConnectionsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MessageWebSocketApi}/*/*"
         - AWSXRayDaemonWriteAccess
 
 
@@ -1263,6 +1282,27 @@ Resources:
 
 
 
+  # ---------|| Lambda to serve frontend config (e.g. WebSocket URL) ||---------
+  ConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/handlers/config
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Tracing: Active
+      Environment:
+        Variables:
+          WEBSOCKET_URL: !Sub "wss://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+      Policies:
+        - AWSXRayDaemonWriteAccess
+      Events:
+        ConfigApiGet:
+          Type: Api
+          Properties:
+            Path: /config
+            Method: get
+            RestApiId: !Ref MessageApi
+
 
 
   # ------------------------------------| Dashboard |------------------------------------
@@ -1457,6 +1497,9 @@ Outputs:
   ApiUrl:
     Description: "API Gateway endpoint"
     Value: !Sub "https://${MessageApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/send"
+  WebSocketUrl:
+    Description: "WebSocket API endpoint (use as wss URL in frontend, no path)"
+    Value: !Sub "wss://${MessageWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   SNSTopicArn:
     Description: "SNS Topic ARN"
     Value: !Ref MySNSTopic

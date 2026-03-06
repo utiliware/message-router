@@ -1,8 +1,9 @@
-import { Container, Divider, Input, Select, Option, Box, Stack, Button } from "@mui/joy";
+import { Container, Divider, Input, Select, Option, Box, Stack, Button, Typography, Chip } from "@mui/joy";
 import { Grid, styled } from '@mui/joy';
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useApi } from "../../../../endpoint/api-base";
 import { useIdx } from "../../../../context";
+import { useWebSocket } from "../../../../hooks/useWebSocket";
 
 const Item = styled(Box)(({ theme }) => ({
   backgroundColor: '#fff',
@@ -17,8 +18,22 @@ const Item = styled(Box)(({ theme }) => ({
 
 export default function Message() {
     const [counter, setCounter] = useState(1)
-    const { setIdx, setMessageIA } = useIdx();
+    const { setIdx, setMessageIA, setWsImageUrl } = useIdx();
     const { sendConfirmationAndMessage, sendMessageToApi } = useApi();
+    const [wsResults, setWsResults] = useState([]);
+
+    const handleWsMessage = useCallback((data) => {
+        setWsResults((prev) => [...prev.slice(-19), { ...data, id: Date.now() }]);
+        if (data.source === "cache" || data.source === "bedrock") {
+            setMessageIA(data.prompt);
+        }
+        if (data.source === "image" && data.imageUrl) {
+            setWsImageUrl(data.imageUrl);
+        }
+    }, [setMessageIA, setWsImageUrl]);
+
+    const { isConnected, error: wsError } = useWebSocket(handleWsMessage);
+
     const [contact, setContact] = useState("email");
     const [form, setForm] = useState({
         lada: "",
@@ -28,7 +43,7 @@ export default function Message() {
         message: "",
     });
     const [contactStorage, setContactStorage] = useState([]);
-    const [ids, setIds] = useState(1);
+    const [ids] = useState(1);
     const [messageTo, setMessageTo] = useState("");
     const [messageToApi, setMessageToApi] = useState("");
     const [apiSendLoading, setApiSendLoading] = useState(false);
@@ -326,6 +341,48 @@ export default function Message() {
                 >
                     Send to console API
                 </Button>
+                <Divider sx={{ my: 2 }} />
+                <Box component="span" sx={{ fontSize: "0.9rem", fontWeight: 600, display: "block", mb: 1 }}>
+                    Live results (WebSocket)
+                </Box>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                    <Chip color={isConnected ? "success" : "neutral"} variant="soft" size="sm">
+                        {isConnected ? "Connected" : "Disconnected"}
+                    </Chip>
+                    {wsError && (
+                        <Typography level="body3" color="danger">{wsError}</Typography>
+                    )}
+                </Stack>
+                {wsResults.length > 0 && (
+                    <Stack spacing={1} sx={{ maxHeight: 280, overflowY: "auto" }}>
+                        {wsResults.map((r) => (
+                            <Box
+                                key={r.id}
+                                sx={{
+                                    p: 1.5,
+                                    borderRadius: "sm",
+                                    bgcolor: "background.level1",
+                                    border: "1px solid",
+                                    borderColor: "neutral.outlinedBorder",
+                                }}
+                            >
+                                {r.source === "image" ? (
+                                    <>
+                                        <Typography level="body3" fontWeight="600">Image ready</Typography>
+                                        <Typography level="body4" sx={{ wordBreak: "break-all" }}>{r.response}</Typography>
+                                        {r.prompt && <Typography level="body4" color="neutral">Prompt: {r.prompt}</Typography>}
+                                    </>
+                                ) : (
+                                    <>
+                                        <Typography level="body3" fontWeight="600">IA ({r.source || "response"})</Typography>
+                                        {r.prompt && <Typography level="body4" color="neutral">{r.prompt}</Typography>}
+                                        <Typography level="body4">{r.response}</Typography>
+                                    </>
+                                )}
+                            </Box>
+                        ))}
+                    </Stack>
+                )}
             </Box>
         </Container>
     );

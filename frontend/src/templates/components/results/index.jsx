@@ -13,30 +13,22 @@ export default function Results() {
             content={            
                 <>
                     <Box sx={{
-                        width: '100%'
+                        width: '100%',
+                        height: '100%',
                     }}>
-                    <Stack
-                        direction="row"
-                        spacing={2}
-                        sx={{
-                            justifyContent: "center",
-                            alignItems: "center",
-                        }}
-                    >
-                        {/* <ResultsMessage/> */}
-                        <ResultsImage/>
-                    </Stack>
-                    <Stack
-                        direction="row"
-                        spacing={2}
-                        sx={{
-                            justifyContent: "center",
-                            alignItems: "stretch",
-                            mt: 2,
-                        }}
-                    >
-                        <ResultsBedrock/>
-                    </Stack>
+                        <Stack
+                            direction="row"
+                            spacing={2}
+                            sx={{
+                                justifyContent: "center",
+                                alignItems: "center",
+                                height: 'auto',
+                            }}
+                        >
+                            {/* <ResultsMessage/> */}
+                            <ResultsImage/>
+                        </Stack>
+                        
                     </Box>
                 </>
             }

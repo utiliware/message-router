@@ -1,7 +1,8 @@
 import axios from "axios";
 
-// CHANGE URL
-const API_URL = 'https://z3gryj0hlg.execute-api.us-east-1.amazonaws.com/Prod';
+// Base URL for REST API (use VITE_API_URL in build, or set for local dev).
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "https://z3gryj0hlg.execute-api.us-east-1.amazonaws.com/Prod";
+const API_URL = API_BASE_URL;
 
 const headers = (id = null) => {
   if (id != null) {
